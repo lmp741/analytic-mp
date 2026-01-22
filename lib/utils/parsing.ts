@@ -108,6 +108,21 @@ export function findHeaderRow(
 }
 
 /**
+ * Finds header row index by matching any keyword in normalized cell values.
+ */
+export function findHeaderRowByKeywords(
+  rows: any[][],
+  keywords: string[],
+  maxRows: number = 50
+): number | null {
+  const normalizedKeywords = keywords.map((keyword) => normalizeHeader(keyword));
+  return findHeaderRow(rows, {
+    maxRows,
+    matcher: (cell) => normalizedKeywords.some((keyword) => cell.includes(keyword)),
+  });
+}
+
+/**
  * Picks column index by matching candidate strings/regex against normalized headers.
  */
 export function pickColIndex(

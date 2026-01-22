@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   formatInt,
   formatPercent,
@@ -141,9 +143,9 @@ export default function WBDashboard() {
           <CardContent className="pt-6">
             <div className="text-center text-muted-foreground">
               Нет данных для отображения. Загрузите данные на странице{' '}
-              <a href="/upload" className="text-blue-600 hover:underline">
+              <Link href="/upload" className="text-blue-600 hover:underline">
                 Загрузка данных
-              </a>
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -157,165 +159,212 @@ export default function WBDashboard() {
     <div className="container mx-auto p-8 max-w-7xl">
       <h1 className="text-3xl font-bold mb-8">WB Dashboard</h1>
 
-      <div className="mb-6">
-        <table className="w-full border-collapse border text-sm">
-          <thead>
-            <tr className="bg-muted">
-              <th className="border p-2 sticky left-0 bg-muted z-10">Артикул</th>
-              <th className="border p-2">Показы</th>
-              <th className="border p-2">Переходы</th>
-              <th className="border p-2">CTR</th>
-              <th className="border p-2">В корзину</th>
-              <th className="border p-2">CR</th>
-              <th className="border p-2">Заказы</th>
-              <th className="border p-2">Выручка</th>
-              <th className="border p-2">Ср. цена</th>
-              <th className="border p-2">Остаток</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.map((metric) => {
-              const impressionsDelta = formatDelta(metric.delta_impressions);
-              const ctrDelta = formatDelta(metric.delta_ctr);
-              return (
-                <tr
-                  key={metric.artikul}
-                  className="hover:bg-muted/50 cursor-pointer"
-                  onClick={() => setSelectedArtikul(metric.artikul)}
-                >
-                  <td className="border p-2 sticky left-0 bg-background font-medium">
-                    {metric.artikul}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.impressions) || undefined}
-                  >
-                    {formatInt(metric.impressions)}
-                    {impressionsDelta.isPositive !== null && (
-                      <span
-                        className={`ml-2 text-xs ${
-                          impressionsDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {impressionsDelta.text}
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.visits) || undefined}
-                  >
-                    {formatInt(metric.visits)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.ctr) || undefined}
-                  >
-                    {formatPercent(metric.ctr)}
-                    {ctrDelta.isPositive !== null && (
-                      <span
-                        className={`ml-2 text-xs ${
-                          ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {ctrDelta.text}
-                      </span>
-                    )}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.add_to_cart) || undefined}
-                  >
-                    {formatInt(metric.add_to_cart)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.cr_to_cart) || undefined}
-                  >
-                    {formatPercent(metric.cr_to_cart)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.orders) || undefined}
-                  >
-                    {formatInt(metric.orders)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.revenue) || undefined}
-                  >
-                    {formatMoney(metric.revenue)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.price_avg) || undefined}
-                  >
-                    {formatMoney(metric.price_avg)}
-                  </td>
-                  <td
-                    className="border p-2"
-                    title={getInvalidValueTooltip(metric.stock_end) || undefined}
-                  >
-                    {formatInt(metric.stock_end)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <Tabs defaultValue="table">
+        <TabsList>
+          <TabsTrigger value="table">Таблица</TabsTrigger>
+          <TabsTrigger value="dynamics">Динамика</TabsTrigger>
+          <TabsTrigger value="problem">Проблемные</TabsTrigger>
+          <TabsTrigger value="ab-tests">A/B тесты</TabsTrigger>
+        </TabsList>
 
-      {selectedMetric && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Детали: {selectedMetric.artikul}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <strong>Показы:</strong> {formatInt(selectedMetric.impressions)}
-              </div>
-              <div>
-                <strong>Переходы:</strong> {formatInt(selectedMetric.visits)}
-              </div>
-              <div>
-                <strong>CTR:</strong> {formatPercent(selectedMetric.ctr)}
-              </div>
-              <div>
-                <strong>В корзину:</strong> {formatInt(selectedMetric.add_to_cart)}
-              </div>
-              <div>
-                <strong>CR:</strong> {formatPercent(selectedMetric.cr_to_cart)}
-              </div>
-              <div>
-                <strong>Заказы:</strong> {formatInt(selectedMetric.orders)}
-              </div>
-              <div>
-                <strong>Выручка:</strong> {formatMoney(selectedMetric.revenue)}
-              </div>
-              <div>
-                <strong>Средняя цена:</strong> {formatMoney(selectedMetric.price_avg)}
-              </div>
-              {selectedMetric.delivery_avg_hours && (
-                <div>
-                  <strong>Ср. время доставки:</strong>{' '}
-                  {selectedMetric.delivery_avg_hours.toFixed(1)} ч
+        <TabsContent value="table">
+          <div className="mb-6">
+            <table className="w-full border-collapse border text-sm">
+              <thead>
+                <tr className="bg-muted">
+                  <th className="border p-2 sticky left-0 bg-muted z-10">Артикул</th>
+                  <th className="border p-2">Показы</th>
+                  <th className="border p-2">Переходы</th>
+                  <th className="border p-2">CTR</th>
+                  <th className="border p-2">В корзину</th>
+                  <th className="border p-2">CR</th>
+                  <th className="border p-2">Заказы</th>
+                  <th className="border p-2">Выручка</th>
+                  <th className="border p-2">Ср. цена</th>
+                  <th className="border p-2">Остаток</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((metric) => {
+                  const impressionsDelta = formatDelta(metric.delta_impressions);
+                  const ctrDelta = formatDelta(metric.delta_ctr);
+                  return (
+                    <tr
+                      key={metric.artikul}
+                      className="hover:bg-muted/50 cursor-pointer"
+                      onClick={() => setSelectedArtikul(metric.artikul)}
+                    >
+                      <td className="border p-2 sticky left-0 bg-background font-medium">
+                        {metric.artikul}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.impressions) || undefined}
+                      >
+                        {formatInt(metric.impressions)}
+                        {impressionsDelta.isPositive !== null && (
+                          <span
+                            className={`ml-2 text-xs ${
+                              impressionsDelta.isPositive ? 'text-green-600' : 'text-red-600'
+                            }`}
+                          >
+                            {impressionsDelta.text}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.visits) || undefined}
+                      >
+                        {formatInt(metric.visits)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.ctr) || undefined}
+                      >
+                        {formatPercent(metric.ctr)}
+                        {ctrDelta.isPositive !== null && (
+                          <span
+                            className={`ml-2 text-xs ${
+                              ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
+                            }`}
+                          >
+                            {ctrDelta.text}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.add_to_cart) || undefined}
+                      >
+                        {formatInt(metric.add_to_cart)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.cr_to_cart) || undefined}
+                      >
+                        {formatPercent(metric.cr_to_cart)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.orders) || undefined}
+                      >
+                        {formatInt(metric.orders)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.revenue) || undefined}
+                      >
+                        {formatMoney(metric.revenue)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.price_avg) || undefined}
+                      >
+                        {formatMoney(metric.price_avg)}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.stock_end) || undefined}
+                      >
+                        {formatInt(metric.stock_end)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {selectedMetric && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Детали: {selectedMetric.artikul}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Показы:</strong> {formatInt(selectedMetric.impressions)}
+                  </div>
+                  <div>
+                    <strong>Переходы:</strong> {formatInt(selectedMetric.visits)}
+                  </div>
+                  <div>
+                    <strong>CTR:</strong> {formatPercent(selectedMetric.ctr)}
+                  </div>
+                  <div>
+                    <strong>В корзину:</strong> {formatInt(selectedMetric.add_to_cart)}
+                  </div>
+                  <div>
+                    <strong>CR:</strong> {formatPercent(selectedMetric.cr_to_cart)}
+                  </div>
+                  <div>
+                    <strong>Заказы:</strong> {formatInt(selectedMetric.orders)}
+                  </div>
+                  <div>
+                    <strong>Выручка:</strong> {formatMoney(selectedMetric.revenue)}
+                  </div>
+                  <div>
+                    <strong>Средняя цена:</strong> {formatMoney(selectedMetric.price_avg)}
+                  </div>
+                  {selectedMetric.delivery_avg_hours && (
+                    <div>
+                      <strong>Ср. время доставки:</strong>{' '}
+                      {selectedMetric.delivery_avg_hours.toFixed(1)} ч
+                    </div>
+                  )}
+                  {selectedMetric.rating && (
+                    <div>
+                      <strong>Рейтинг:</strong> {selectedMetric.rating.toFixed(2)}
+                    </div>
+                  )}
+                  {selectedMetric.reviews_count && (
+                    <div>
+                      <strong>Отзывы:</strong> {formatInt(selectedMetric.reviews_count)}
+                    </div>
+                  )}
                 </div>
-              )}
-              {selectedMetric.rating && (
-                <div>
-                  <strong>Рейтинг:</strong> {selectedMetric.rating.toFixed(2)}
-                </div>
-              )}
-              {selectedMetric.reviews_count && (
-                <div>
-                  <strong>Отзывы:</strong> {formatInt(selectedMetric.reviews_count)}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="dynamics">
+          <Card>
+            <CardHeader>
+              <CardTitle>Динамика</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Динамика по WB появится в следующем обновлении. Сейчас можно посмотреть изменения в
+              таблице или перейти в Summary для общих сигналов.
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="problem">
+          <Card>
+            <CardHeader>
+              <CardTitle>Проблемные позиции</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Перейдите в <Link className="text-blue-600 hover:underline" href="/summary">Summary</Link>{' '}
+              для списка проблемных артикула и сигналов.
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ab-tests">
+          <Card>
+            <CardHeader>
+              <CardTitle>A/B тесты</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Откройте <Link className="text-blue-600 hover:underline" href="/ab-tests">A/B tests</Link>{' '}
+              чтобы увидеть эксперименты по WB.
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1,4 +1,9 @@
-import { findHeaderRow, parseNumberRU, parsePercentToFraction } from '@/lib/utils/parsing';
+import {
+  findHeaderRow,
+  findHeaderRowByKeywords,
+  parseNumberRU,
+  parsePercentToFraction,
+} from '@/lib/utils/parsing';
 
 describe('parsing utilities', () => {
   test('parseNumberRU handles RU formatted numbers', () => {
@@ -24,6 +29,20 @@ describe('parsing utilities', () => {
       maxRows: 10,
       matcher: (cell) => cell.includes('артикул') && cell.includes('продав'),
     });
+    expect(headerRowIndex).toBe(1);
+  });
+
+  test('findHeaderRowByKeywords finds header by section labels', () => {
+    const data = [
+      ['Отчет', null],
+      ['Воронка продаж', 'Факторы продаж', null],
+      ['Артикул', 'Показы всего', 'Посещения карточки товара'],
+    ];
+    const headerRowIndex = findHeaderRowByKeywords(
+      data,
+      ['Воронка продаж', 'Факторы продаж', 'Продажи'],
+      10
+    );
     expect(headerRowIndex).toBe(1);
   });
 });

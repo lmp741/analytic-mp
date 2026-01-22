@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, type ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Accordion, AccordionItem } from '@/components/ui/accordion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { parseWBFile, type WBParseResult } from '@/lib/parsers/wb';
@@ -13,6 +15,7 @@ import {
   formatMoney,
   getInvalidValueTooltip,
 } from '@/lib/utils/formatting';
+import { cn } from '@/lib/utils/cn';
 
 type UploadState = 'idle' | 'parsing' | 'parsed' | 'importing' | 'imported' | 'error';
 type StatusLevel = 'idle' | 'ok' | 'warn' | 'error';
@@ -24,7 +27,7 @@ const statusConfig: Record<StatusLevel, { label: string; className: string }> = 
   error: { label: '🔴 ERROR', className: 'text-red-600' },
 };
 
-const columnLabels: Record<string, string> = {
+const wbColumnLabels: Record<string, string> = {
   artikul: 'Артикул продавца',
   impressions: 'Показы',
   visits: 'Переходы в карточку',
@@ -39,6 +42,22 @@ const columnLabels: Record<string, string> = {
   rating: 'Рейтинг',
   reviews: 'Отзывы',
   drr: 'ДРР',
+};
+
+const ozonColumnLabels: Record<string, string> = {
+  artikul: 'Артикул',
+  impressions: 'Показы всего',
+  visits: 'Посещения карточки товара',
+  ctr: 'CTR',
+  add_to_cart: 'Добавления в корзину',
+  cr_to_cart: 'Конверсия в корзину',
+  orders: 'Заказано товаров',
+  revenue: 'Заказано на сумму / Выручка',
+  price_avg: 'Средняя цена',
+  stock_end: 'Остаток на конец периода',
+  rating: 'Рейтинг товара',
+  reviews: 'Отзывы',
+  drr: 'Общая ДРР',
 };
 
 export default function UploadPage() {
@@ -190,12 +209,15 @@ export default function UploadPage() {
           end: ozonResult.periodEnd?.toISOString(),
         } : null,
         mapping: ozonResult.diagnostics.columnMapping,
-        header_row_index: ozonResult.diagnostics.headerStartRow,
+        header_row_1_index: ozonResult.diagnostics.headerStartRow,
+        header_row_2_index: ozonResult.diagnostics.headerSecondRow,
+        header_sample: ozonResult.diagnostics.headerSample,
         stats: {
           totalRowsScanned: ozonResult.diagnostics.totalRowsScanned,
           rowsAccepted: ozonResult.diagnostics.rowsAccepted,
           rowsSkipped: ozonResult.diagnostics.rowsSkipped,
           duplicatesAggregated: ozonResult.diagnostics.duplicatesAggregated,
+          aggregationApplied: ozonResult.diagnostics.aggregationApplied,
           skipReasons: ozonResult.diagnostics.skipReasons,
         },
         warnings: ozonResult.warnings,
@@ -300,6 +322,40 @@ export default function UploadPage() {
             </Button>
           </div>
 
+          {state === 'imported' && (
+            <Card className="border-emerald-500/50 bg-emerald-50/50">
+              <CardHeader>
+                <CardTitle className="text-emerald-700">Импорт завершён</CardTitle>
+                <CardDescription>
+                  Данные успешно загружены. Перейдите к просмотру результатов.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-3">
+                {wbResult && (
+                  <Link href="/wb" className={buttonVariants()}>
+                    Перейти в WB
+                  </Link>
+                )}
+                {ozonResult && (
+                  <Link href="/ozon" className={buttonVariants()}>
+                    Перейти в Ozon
+                  </Link>
+                )}
+                <Link href="/summary" className={buttonVariants({ variant: 'secondary' })}>
+                  Открыть Summary
+                </Link>
+                <Link
+                  href="/"
+                  className={cn(
+                    "text-sm text-muted-foreground underline-offset-4 hover:underline"
+                  )}
+                >
+                  В главное меню
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+
           {wbResult && (
             <Card>
               <CardHeader>
@@ -316,6 +372,7 @@ export default function UploadPage() {
                   diagnostics={{
                     sheetName: wbResult.diagnostics.sheetName,
                     headerRowIndex: wbResult.diagnostics.headerRowIndex,
+                    headerRowIndexSecondary: null,
                     totalRowsScanned: wbResult.diagnostics.totalRowsScanned,
                     rowsAccepted: wbResult.diagnostics.rowsAccepted,
                     rowsSkipped: wbResult.diagnostics.rowsSkipped,
@@ -325,6 +382,7 @@ export default function UploadPage() {
                   }}
                   errors={wbResult.errors}
                   warnings={wbResult.warnings}
+                  columnLabels={wbColumnLabels}
                   preview={
                     wbResult.rows.length > 0 && (
                       <table className="mt-2 w-full text-sm border">
@@ -399,18 +457,21 @@ export default function UploadPage() {
                   diagnostics={{
                     sheetName: ozonResult.diagnostics.sheetName,
                     headerRowIndex: ozonResult.diagnostics.headerStartRow,
+                    headerRowIndexSecondary: ozonResult.diagnostics.headerSecondRow,
                     totalRowsScanned: ozonResult.diagnostics.totalRowsScanned,
                     rowsAccepted: ozonResult.diagnostics.rowsAccepted,
                     rowsSkipped: ozonResult.diagnostics.rowsSkipped,
                     skipReasons: {
                       ...ozonResult.diagnostics.skipReasons,
                       duplicates_aggregated: ozonResult.diagnostics.duplicatesAggregated,
+                      aggregation_applied: ozonResult.diagnostics.aggregationApplied ? 1 : 0,
                     },
-                    headerSample: [],
+                    headerSample: ozonResult.diagnostics.headerSample,
                     columnMapping: ozonResult.diagnostics.columnMapping,
                   }}
                   errors={ozonResult.errors}
                   warnings={ozonResult.warnings}
+                  columnLabels={ozonColumnLabels}
                   preview={
                     ozonResult.rows.length > 0 && (
                       <table className="mt-2 w-full text-sm border">
@@ -508,7 +569,7 @@ function UploadCard({
 
   return (
     <Card
-      className={`border-2 border-dashed transition ${
+      className={`rounded-2xl border-2 border-dashed transition ${
         isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/20'
       }`}
       onDragOver={(event) => {
@@ -565,6 +626,7 @@ function DiagnosticsAccordion({
   diagnostics,
   errors,
   warnings,
+  columnLabels,
   preview,
 }: {
   file: File | null;
@@ -573,6 +635,7 @@ function DiagnosticsAccordion({
   diagnostics: {
     sheetName: string | null;
     headerRowIndex: number | null;
+    headerRowIndexSecondary: number | null;
     totalRowsScanned: number;
     rowsAccepted: number;
     rowsSkipped: number;
@@ -582,6 +645,7 @@ function DiagnosticsAccordion({
   };
   errors: string[];
   warnings: string[];
+  columnLabels: Record<string, string>;
   preview: ReactNode;
 }) {
   return (
@@ -600,75 +664,80 @@ function DiagnosticsAccordion({
           )}
         </div>
       )}
-      <details open className="rounded-lg border p-4">
-        <summary className="cursor-pointer text-sm font-semibold">Файл</summary>
-        <div className="mt-3 space-y-2 text-sm">
-          <div>
-            <strong>Имя:</strong> {file?.name || '—'}
-          </div>
-          <div>
-            <strong>Sheet:</strong> {diagnostics.sheetName || 'N/A'}
-          </div>
-          <div>
-            <strong>Строка шапки:</strong>{' '}
-            {diagnostics.headerRowIndex !== null
-              ? `${diagnostics.headerRowIndex + 1} (index ${diagnostics.headerRowIndex})`
-              : '—'}
-          </div>
-          {diagnostics.headerSample.length > 0 && (
+      <Accordion>
+        <AccordionItem title="Файл" defaultOpen>
+          <div className="space-y-2 text-sm">
             <div>
-              <strong>Первые заголовки:</strong> {diagnostics.headerSample.join(', ')}
+              <strong>Имя:</strong> {file?.name || '—'}
             </div>
-          )}
-        </div>
-      </details>
-      <details className="rounded-lg border p-4">
-        <summary className="cursor-pointer text-sm font-semibold">Период</summary>
-        <div className="mt-3 text-sm">
-          {periodStart
-            ? `${periodStart.toLocaleDateString('ru-RU')} - ${periodEnd?.toLocaleDateString('ru-RU')}`
-            : 'Не обнаружен'}
-        </div>
-      </details>
-      <details className="rounded-lg border p-4">
-        <summary className="cursor-pointer text-sm font-semibold">Колонки</summary>
-        <div className="mt-3 grid gap-2 text-sm">
-          {Object.entries(diagnostics.columnMapping).map(([key, value]) => (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">{columnLabels[key] || key}</span>
-              <span className="font-medium">{value || '—'}</span>
-            </div>
-          ))}
-        </div>
-      </details>
-      <details className="rounded-lg border p-4">
-        <summary className="cursor-pointer text-sm font-semibold">Строки</summary>
-        <div className="mt-3 space-y-2 text-sm">
-          <div>
-            <strong>Rows scanned:</strong> {diagnostics.totalRowsScanned}
-          </div>
-          <div>
-            <strong>Rows accepted:</strong> {diagnostics.rowsAccepted}
-          </div>
-          <div>
-            <strong>Rows skipped:</strong> {diagnostics.rowsSkipped}
-          </div>
-          {Object.keys(diagnostics.skipReasons).length > 0 && (
             <div>
-              <strong>Причины пропуска:</strong>{' '}
-              {Object.entries(diagnostics.skipReasons)
-                .map(([reason, count]) => `${reason}: ${count}`)
-                .join(', ')}
+              <strong>Sheet:</strong> {diagnostics.sheetName || 'N/A'}
             </div>
-          )}
-        </div>
-      </details>
-      {preview && (
-        <details className="rounded-lg border p-4">
-          <summary className="cursor-pointer text-sm font-semibold">Превью</summary>
-          <div className="mt-3">{preview}</div>
-        </details>
-      )}
+            <div>
+              <strong>Строка шапки:</strong>{' '}
+              {diagnostics.headerRowIndex !== null
+                ? `${diagnostics.headerRowIndex + 1} (index ${diagnostics.headerRowIndex})`
+                : '—'}
+            </div>
+            {diagnostics.headerRowIndexSecondary !== null && (
+              <div>
+                <strong>Строка шапки (2):</strong>{' '}
+                {`${diagnostics.headerRowIndexSecondary + 1} (index ${diagnostics.headerRowIndexSecondary})`}
+              </div>
+            )}
+            {diagnostics.headerSample.length > 0 && (
+              <div>
+                <strong>Первые заголовки:</strong> {diagnostics.headerSample.join(', ')}
+              </div>
+            )}
+          </div>
+        </AccordionItem>
+        <AccordionItem title="Период">
+          <div className="text-sm">
+            {periodStart
+              ? `${periodStart.toLocaleDateString('ru-RU')} - ${periodEnd?.toLocaleDateString('ru-RU')}`
+              : 'Не обнаружен'}
+          </div>
+        </AccordionItem>
+        <AccordionItem title="Колонки">
+          <div className="grid gap-2 text-sm">
+            {Object.entries(diagnostics.columnMapping).map(([key, value]) => (
+              <div key={key} className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">{columnLabels[key] || key}</span>
+                <span className="max-w-[60%] truncate text-right font-medium" title={value || ''}>
+                  {value || '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </AccordionItem>
+        <AccordionItem title="Строки">
+          <div className="space-y-2 text-sm">
+            <div>
+              <strong>Rows scanned:</strong> {diagnostics.totalRowsScanned}
+            </div>
+            <div>
+              <strong>Rows accepted:</strong> {diagnostics.rowsAccepted}
+            </div>
+            <div>
+              <strong>Rows skipped:</strong> {diagnostics.rowsSkipped}
+            </div>
+            {Object.keys(diagnostics.skipReasons).length > 0 && (
+              <div>
+                <strong>Причины пропуска:</strong>{' '}
+                {Object.entries(diagnostics.skipReasons)
+                  .map(([reason, count]) => `${reason}: ${count}`)
+                  .join(', ')}
+              </div>
+            )}
+          </div>
+        </AccordionItem>
+        {preview && (
+          <AccordionItem title="Превью">
+            <div>{preview}</div>
+          </AccordionItem>
+        )}
+      </Accordion>
     </div>
   );
 }
