@@ -1,0 +1,25 @@
+# Команды для загрузки на GitHub
+# Скопируйте и выполните по порядку в PowerShell/терминале
+
+# 1. Инициализация репозитория
+git init
+
+# 2. Добавление всех файлов
+git add .
+
+# 3. Первый коммит
+git commit -m "Initial commit: Analytic MP project"
+
+# 4. Подключение к GitHub (ЗАМЕНИТЕ YOUR_USERNAME на ваш GitHub username)
+git remote add origin https://github.com/YOUR_USERNAME/analytic-mp.git
+
+# 5. Переименование ветки в main
+git branch -M main
+
+# 6. Загрузка на GitHub
+git push -u origin main
+
+# Если возникнут проблемы с авторизацией:
+# - Используйте Personal Access Token вместо пароля
+# - Создайте токен: GitHub → Settings → Developer settings → Personal access tokens
+# - Права: repo (полный доступ к репозиториям)
