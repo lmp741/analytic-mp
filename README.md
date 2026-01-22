@@ -41,6 +41,7 @@ npm install
 2. Перейдите в SQL Editor и выполните миграции:
    - `supabase/migrations/001_initial_schema.sql`
    - `supabase/migrations/002_rls_policies.sql`
+   - `supabase/migrations/003_disable_rls.sql` (для single-user v1)
 
 3. Получите URL и Anon Key из Settings > API
 
@@ -158,10 +159,22 @@ npm run dev
 
 ## Безопасность
 
-- RLS (Row Level Security) включен для всех таблиц
+- RLS (Row Level Security) отключен для single-user v1 через `003_disable_rls.sql`
 - Аутентификация через Supabase Auth (опционально)
 - Service role key не используется в клиенте
 - Все операции проверяют права доступа
+
+## Применение миграций (Supabase)
+
+Можно применить миграции двумя способами:
+
+1. **SQL Editor**: последовательно выполните файлы из `supabase/migrations/`.
+2. **Supabase CLI** (если используется локально):
+   ```bash
+   supabase db push
+   ```
+
+Если таблицы не применены, /upload покажет предупреждение **DB schema not applied**.
 
 ## Тестирование
 

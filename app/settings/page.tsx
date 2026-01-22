@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { parseRuNumber, toPercentInput } from '@/lib/utils/number';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>(null);
@@ -19,11 +20,15 @@ export default function SettingsPage() {
   const loadSettings = async () => {
     try {
       const supabase = createClient();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('settings')
         .select('*')
         .eq('id', 1)
-        .single();
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
 
       if (data) {
         setSettings(data);
@@ -52,6 +57,7 @@ export default function SettingsPage() {
           drr_worse_pct: settings.drr_worse_pct,
           max_zone_tags: settings.max_zone_tags,
           ignore_prev_zero: settings.ignore_prev_zero,
+          summary_max_rows_per_mp: settings.summary_max_rows_per_mp,
           updated_at: new Date().toISOString(),
         })
         .eq('id', 1);
@@ -111,16 +117,16 @@ export default function SettingsPage() {
             </Label>
             <Input
               id="ctr_drop_pct"
-              type="number"
-              step="0.01"
-              value={settings.ctr_drop_pct * 100}
+              type="text"
+              inputMode="decimal"
+              value={toPercentInput(settings.ctr_drop_pct)}
               onChange={(e) =>
-                updateSetting('ctr_drop_pct', (parseFloat(e.target.value) || 0) / 100)
+                updateSetting(
+                  'ctr_drop_pct',
+                  (parseRuNumber(e.target.value) || 0) / 100
+                )
               }
             />
-            <p className="text-sm text-muted-foreground mt-1">
-              Хранится как: {settings.ctr_drop_pct} (дробь)
-            </p>
           </div>
 
           <div>
@@ -129,11 +135,14 @@ export default function SettingsPage() {
             </Label>
             <Input
               id="cr_to_cart_drop_pct"
-              type="number"
-              step="0.01"
-              value={settings.cr_to_cart_drop_pct * 100}
+              type="text"
+              inputMode="decimal"
+              value={toPercentInput(settings.cr_to_cart_drop_pct)}
               onChange={(e) =>
-                updateSetting('cr_to_cart_drop_pct', (parseFloat(e.target.value) || 0) / 100)
+                updateSetting(
+                  'cr_to_cart_drop_pct',
+                  (parseRuNumber(e.target.value) || 0) / 100
+                )
               }
             />
           </div>
@@ -144,11 +153,14 @@ export default function SettingsPage() {
             </Label>
             <Input
               id="orders_drop_pct"
-              type="number"
-              step="0.01"
-              value={settings.orders_drop_pct * 100}
+              type="text"
+              inputMode="decimal"
+              value={toPercentInput(settings.orders_drop_pct)}
               onChange={(e) =>
-                updateSetting('orders_drop_pct', (parseFloat(e.target.value) || 0) / 100)
+                updateSetting(
+                  'orders_drop_pct',
+                  (parseRuNumber(e.target.value) || 0) / 100
+                )
               }
             />
           </div>
@@ -159,11 +171,14 @@ export default function SettingsPage() {
             </Label>
             <Input
               id="revenue_drop_pct"
-              type="number"
-              step="0.01"
-              value={settings.revenue_drop_pct * 100}
+              type="text"
+              inputMode="decimal"
+              value={toPercentInput(settings.revenue_drop_pct)}
               onChange={(e) =>
-                updateSetting('revenue_drop_pct', (parseFloat(e.target.value) || 0) / 100)
+                updateSetting(
+                  'revenue_drop_pct',
+                  (parseRuNumber(e.target.value) || 0) / 100
+                )
               }
             />
           </div>
@@ -174,11 +189,14 @@ export default function SettingsPage() {
             </Label>
             <Input
               id="drr_worse_pct"
-              type="number"
-              step="0.01"
-              value={settings.drr_worse_pct * 100}
+              type="text"
+              inputMode="decimal"
+              value={toPercentInput(settings.drr_worse_pct)}
               onChange={(e) =>
-                updateSetting('drr_worse_pct', (parseFloat(e.target.value) || 0) / 100)
+                updateSetting(
+                  'drr_worse_pct',
+                  (parseRuNumber(e.target.value) || 0) / 100
+                )
               }
             />
           </div>
@@ -196,6 +214,22 @@ export default function SettingsPage() {
               }
               min={1}
               max={5}
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="summary_max_rows_per_mp">
+              Максимум строк Summary на маркетплейс
+            </Label>
+            <Input
+              id="summary_max_rows_per_mp"
+              type="number"
+              value={settings.summary_max_rows_per_mp ?? 50}
+              onChange={(e) =>
+                updateSetting('summary_max_rows_per_mp', parseInt(e.target.value) || 50)
+              }
+              min={1}
+              max={200}
             />
           </div>
 

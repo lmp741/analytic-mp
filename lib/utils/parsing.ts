@@ -3,6 +3,7 @@
  * Handles RU locale, malformed data, and edge cases
  */
 
+import { parseRuNumber, parseRuPercentToFraction } from '@/lib/utils/number';
 /**
  * Normalizes header strings: trim, collapse spaces, replace line breaks
  */
@@ -11,6 +12,7 @@ export function normalizeHeader(str: string | null | undefined): string {
   return str
     .toString()
     .trim()
+    .replace(/[\u00a0]/g, ' ')
     .replace(/[\n\r]+/g, ' ')
     .replace(/\s+/g, ' ')
     .toLowerCase();
@@ -21,42 +23,7 @@ export function normalizeHeader(str: string | null | undefined): string {
  * Handles: "12 345", "12,34", "12.34", "₽", "%", empty, "—", null
  */
 export function parseNumberRU(value: any): number | null {
-  if (value === null || value === undefined) return null;
-  
-  if (typeof value === 'number') {
-    if (isNaN(value) || !isFinite(value)) return null;
-    return value;
-  }
-
-  if (typeof value !== 'string') {
-    const num = Number(value);
-    if (!isNaN(num) && isFinite(num)) return num;
-    return null;
-  }
-
-  let str = value.trim();
-  
-  // Handle empty or dash
-  if (str === '' || str === '—' || str === '-' || str === '–') return null;
-  
-  // Remove currency and percent symbols
-  str = str.replace(/[₽%]/g, '');
-  
-  // Remove spaces (thousand separators)
-  str = str.replace(/\s/g, '');
-  
-  // Replace comma with dot for decimal
-  str = str.replace(',', '.');
-  
-  // Remove any remaining non-numeric characters except dot and minus
-  str = str.replace(/[^\d.-]/g, '');
-  
-  if (str === '' || str === '-' || str === '.') return null;
-  
-  const num = parseFloat(str);
-  if (isNaN(num) || !isFinite(num)) return null;
-  
-  return num;
+  return parseRuNumber(value);
 }
 
 /**
@@ -64,18 +31,67 @@ export function parseNumberRU(value: any): number | null {
  * If value > 1 and <= 100, assumes percent; else if 0..1 assumes fraction
  */
 export function parsePercentToFraction(value: any): number | null {
-  const num = parseNumberRU(value);
-  if (num === null) return null;
-  
-  if (num > 1 && num <= 100) {
-    // Assume percent, convert to fraction
-    return num / 100;
-  } else if (num >= 0 && num <= 1) {
-    // Already fraction
-    return num;
+  return parseRuPercentToFraction(value);
+}
+
+/**
+ * Finds header row index by matching normalized cell values.
+ */
+export function findHeaderRow(
+  rows: any[][],
+  options: {
+    maxRows?: number;
+    matcher: (normalizedCell: string) => boolean;
   }
-  
-  // Out of range
+): number | null {
+  const maxRows = Math.min(options.maxRows ?? 50, rows.length - 1);
+  for (let i = 0; i <= maxRows; i++) {
+    const row = rows[i] || [];
+    for (const cell of row) {
+      const normalized = normalizeHeader(cell);
+      if (normalized && options.matcher(normalized)) {
+        return i;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Finds header row index by matching any keyword in normalized cell values.
+ */
+export function findHeaderRowByKeywords(
+  rows: any[][],
+  keywords: string[],
+  maxRows: number = 50
+): number | null {
+  const normalizedKeywords = keywords.map((keyword) => normalizeHeader(keyword));
+  return findHeaderRow(rows, {
+    maxRows,
+    matcher: (cell) => normalizedKeywords.some((keyword) => cell.includes(keyword)),
+  });
+}
+
+/**
+ * Picks column index by matching candidate strings/regex against normalized headers.
+ */
+export function pickColIndex(
+  headers: string[],
+  candidates: Array<string | RegExp>
+): number | null {
+  for (const candidate of candidates) {
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i];
+      if (!header) continue;
+      if (typeof candidate === 'string') {
+        if (header.includes(candidate.toLowerCase())) {
+          return i;
+        }
+      } else if (candidate.test(header)) {
+        return i;
+      }
+    }
+  }
   return null;
 }
 

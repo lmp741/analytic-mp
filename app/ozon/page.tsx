@@ -1,9 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatInt, formatPercent, formatMoney, formatDelta } from '@/lib/utils/formatting';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  formatInt,
+  formatPercent,
+  formatMoney,
+  getInvalidValueTooltip,
+} from '@/lib/utils/formatting';
+import { calcDeltaPercent } from '@/lib/utils/number';
+import { MetricCell } from '@/components/metric-cell';
 
 interface WeeklyMetric {
   artikul: string;
@@ -25,6 +34,9 @@ interface WeeklyMetric {
   delta_orders?: number | null;
   delta_revenue?: number | null;
   delta_drr?: number | null;
+  delta_add_to_cart?: number | null;
+  delta_cr_to_cart?: number | null;
+  delta_price_avg?: number | null;
 }
 
 export default function OzonDashboard() {
@@ -40,14 +52,17 @@ export default function OzonDashboard() {
     try {
       const supabase = createClient();
       
-      const { data: latestImport } = await supabase
+      const { data: latestImport, error: latestImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'OZON')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (latestImportError && latestImportError.code !== 'PGRST116') {
+        throw latestImportError;
+      }
 
       if (!latestImport) {
         setLoading(false);
@@ -58,13 +73,16 @@ export default function OzonDashboard() {
       prevWeekStart.setDate(prevWeekStart.getDate() - 7);
       const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-      const { data: prevImport } = await supabase
+      const { data: prevImport, error: prevImportError } = await supabase
         .from('imports')
         .select('id')
         .eq('marketplace', 'OZON')
         .eq('period_start', prevWeekStartStr)
         .eq('status', 'IMPORTED')
-        .single();
+        .maybeSingle();
+      if (prevImportError && prevImportError.code !== 'PGRST116') {
+        throw prevImportError;
+      }
 
       const { data: currentMetrics } = await supabase
         .from('weekly_metrics')
@@ -95,18 +113,24 @@ export default function OzonDashboard() {
         const prev = prevMetricsMap.get(current.artikul);
         return {
           ...current,
-          delta_impressions: prev
-            ? current.impressions - prev.impressions
-            : null,
-          delta_visits: prev ? current.visits - prev.visits : null,
-          delta_ctr: prev ? current.ctr - prev.ctr : null,
-          delta_orders: prev ? current.orders - prev.orders : null,
-          delta_revenue: prev && current.revenue && prev.revenue
-            ? Number(current.revenue) - Number(prev.revenue)
-            : null,
-          delta_drr: prev && current.drr !== null && prev.drr !== null
-            ? current.drr - prev.drr
-            : null,
+          delta_impressions: prev ? calcDeltaPercent(current.impressions, prev.impressions) : null,
+          delta_visits: prev ? calcDeltaPercent(current.visits, prev.visits) : null,
+          delta_ctr: prev ? calcDeltaPercent(current.ctr, prev.ctr) : null,
+          delta_add_to_cart: prev ? calcDeltaPercent(current.add_to_cart, prev.add_to_cart) : null,
+          delta_cr_to_cart: prev ? calcDeltaPercent(current.cr_to_cart, prev.cr_to_cart) : null,
+          delta_orders: prev ? calcDeltaPercent(current.orders, prev.orders) : null,
+          delta_revenue:
+            prev && current.revenue !== null && prev.revenue !== null
+              ? calcDeltaPercent(Number(current.revenue), Number(prev.revenue))
+              : null,
+          delta_drr:
+            prev && current.drr !== null && prev.drr !== null
+              ? calcDeltaPercent(current.drr, prev.drr)
+              : null,
+          delta_price_avg:
+            prev && current.price_avg !== null && prev.price_avg !== null
+              ? calcDeltaPercent(Number(current.price_avg), Number(prev.price_avg))
+              : null,
         };
       });
 
@@ -134,9 +158,9 @@ export default function OzonDashboard() {
           <CardContent className="pt-6">
             <div className="text-center text-muted-foreground">
               Нет данных для отображения. Загрузите данные на странице{' '}
-              <a href="/upload" className="text-blue-600 hover:underline">
+              <Link href="/upload" className="text-blue-600 hover:underline">
                 Загрузка данных
-              </a>
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -150,135 +174,231 @@ export default function OzonDashboard() {
     <div className="container mx-auto p-8 max-w-7xl">
       <h1 className="text-3xl font-bold mb-8">Ozon Dashboard</h1>
 
-      <div className="mb-6">
-        <table className="w-full border-collapse border text-sm">
-          <thead>
-            <tr className="bg-muted">
-              <th className="border p-2 sticky left-0 bg-muted z-10">Артикул</th>
-              <th className="border p-2">Показы</th>
-              <th className="border p-2">Переходы</th>
-              <th className="border p-2">CTR</th>
-              <th className="border p-2">В корзину</th>
-              <th className="border p-2">CR</th>
-              <th className="border p-2">Заказы</th>
-              <th className="border p-2">Выручка</th>
-              <th className="border p-2">Ср. цена</th>
-              <th className="border p-2">ДРР</th>
-              <th className="border p-2">Остаток</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.map((metric) => {
-              const impressionsDelta = formatDelta(metric.delta_impressions);
-              const ctrDelta = formatDelta(metric.delta_ctr);
-              const drrDelta = formatDelta(metric.delta_drr, true); // Inverted
-              return (
-                <tr
-                  key={metric.artikul}
-                  className="hover:bg-muted/50 cursor-pointer"
-                  onClick={() => setSelectedArtikul(metric.artikul)}
-                >
-                  <td className="border p-2 sticky left-0 bg-background font-medium">
-                    {metric.artikul}
-                  </td>
-                  <td className="border p-2">
-                    {formatInt(metric.impressions)}
-                    {impressionsDelta.isPositive !== null && (
-                      <span
-                        className={`ml-2 text-xs ${
-                          impressionsDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {impressionsDelta.text}
-                      </span>
-                    )}
-                  </td>
-                  <td className="border p-2">{formatInt(metric.visits)}</td>
-                  <td className="border p-2">
-                    {formatPercent(metric.ctr)}
-                    {ctrDelta.isPositive !== null && (
-                      <span
-                        className={`ml-2 text-xs ${
-                          ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {ctrDelta.text}
-                      </span>
-                    )}
-                  </td>
-                  <td className="border p-2">{formatInt(metric.add_to_cart)}</td>
-                  <td className="border p-2">{formatPercent(metric.cr_to_cart)}</td>
-                  <td className="border p-2">{formatInt(metric.orders)}</td>
-                  <td className="border p-2">{formatMoney(metric.revenue)}</td>
-                  <td className="border p-2">{formatMoney(metric.price_avg)}</td>
-                  <td className="border p-2">
-                    {formatPercent(metric.drr)}
-                    {drrDelta.isPositive !== null && (
-                      <span
-                        className={`ml-2 text-xs ${
-                          drrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                        }`}
-                      >
-                        {drrDelta.text}
-                      </span>
-                    )}
-                  </td>
-                  <td className="border p-2">{formatInt(metric.stock_end)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <Tabs defaultValue="table">
+        <TabsList>
+          <TabsTrigger value="table">Таблица</TabsTrigger>
+          <TabsTrigger value="dynamics">Динамика</TabsTrigger>
+          <TabsTrigger value="problem">Проблемные</TabsTrigger>
+          <TabsTrigger value="ab-tests">A/B тесты</TabsTrigger>
+        </TabsList>
 
-      {selectedMetric && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Детали: {selectedMetric.artikul}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <strong>Показы:</strong> {formatInt(selectedMetric.impressions)}
-              </div>
-              <div>
-                <strong>Переходы:</strong> {formatInt(selectedMetric.visits)}
-              </div>
-              <div>
-                <strong>CTR:</strong> {formatPercent(selectedMetric.ctr)}
-              </div>
-              <div>
-                <strong>В корзину:</strong> {formatInt(selectedMetric.add_to_cart)}
-              </div>
-              <div>
-                <strong>CR:</strong> {formatPercent(selectedMetric.cr_to_cart)}
-              </div>
-              <div>
-                <strong>Заказы:</strong> {formatInt(selectedMetric.orders)}
-              </div>
-              <div>
-                <strong>Выручка:</strong> {formatMoney(selectedMetric.revenue)}
-              </div>
-              <div>
-                <strong>Средняя цена:</strong> {formatMoney(selectedMetric.price_avg)}
-              </div>
-              <div>
-                <strong>ДРР:</strong> {formatPercent(selectedMetric.drr)}
-              </div>
-              {selectedMetric.rating && (
-                <div>
-                  <strong>Рейтинг:</strong> {selectedMetric.rating.toFixed(2)}
+        <TabsContent value="table">
+          <div className="mb-6">
+            <table className="w-full border-collapse border text-sm">
+              <thead>
+                <tr className="bg-muted">
+                  <th className="border p-2 sticky left-0 bg-muted z-10">Артикул</th>
+                  <th className="border p-2">Показы</th>
+                  <th className="border p-2">Переходы</th>
+                  <th className="border p-2">CTR</th>
+                  <th className="border p-2">В корзину</th>
+                  <th className="border p-2">CR</th>
+                  <th className="border p-2">Заказы</th>
+                  <th className="border p-2">Выручка</th>
+                  <th className="border p-2">Ср. цена</th>
+                  <th className="border p-2">ДРР</th>
+                  <th className="border p-2">Остаток</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((metric) => {
+                  return (
+                    <tr
+                      key={metric.artikul}
+                      className="hover:bg-muted/50 cursor-pointer"
+                      onClick={() => setSelectedArtikul(metric.artikul)}
+                    >
+                      <td className="border p-2 sticky left-0 bg-background font-medium">
+                        {metric.artikul}
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.impressions) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(metric.impressions)}
+                          deltaPct={metric.delta_impressions ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.visits) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(metric.visits)}
+                          deltaPct={metric.delta_visits ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.ctr) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(metric.ctr, 2)}
+                          deltaPct={metric.delta_ctr ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.add_to_cart) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(metric.add_to_cart)}
+                          deltaPct={metric.delta_add_to_cart ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.cr_to_cart) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(metric.cr_to_cart, 2)}
+                          deltaPct={metric.delta_cr_to_cart ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.orders) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(metric.orders)}
+                          deltaPct={metric.delta_orders ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.revenue) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(metric.revenue)}
+                          deltaPct={metric.delta_revenue ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.price_avg) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(metric.price_avg)}
+                          deltaPct={metric.delta_price_avg ?? null}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.drr) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(metric.drr, 2)}
+                          deltaPct={metric.delta_drr ?? null}
+                          isInverted
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(metric.stock_end) || undefined}
+                      >
+                        {formatInt(metric.stock_end)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {selectedMetric && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Детали: {selectedMetric.artikul}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Показы:</strong> {formatInt(selectedMetric.impressions)}
+                  </div>
+                  <div>
+                    <strong>Переходы:</strong> {formatInt(selectedMetric.visits)}
+                  </div>
+                  <div>
+                    <strong>CTR:</strong> {formatPercent(selectedMetric.ctr)}
+                  </div>
+                  <div>
+                    <strong>В корзину:</strong> {formatInt(selectedMetric.add_to_cart)}
+                  </div>
+                  <div>
+                    <strong>CR:</strong> {formatPercent(selectedMetric.cr_to_cart)}
+                  </div>
+                  <div>
+                    <strong>Заказы:</strong> {formatInt(selectedMetric.orders)}
+                  </div>
+                  <div>
+                    <strong>Выручка:</strong> {formatMoney(selectedMetric.revenue)}
+                  </div>
+                  <div>
+                    <strong>Средняя цена:</strong> {formatMoney(selectedMetric.price_avg)}
+                  </div>
+                  {selectedMetric.stock_end !== null && (
+                    <div>
+                      <strong>Остаток:</strong> {formatInt(selectedMetric.stock_end)}
+                    </div>
+                  )}
+                  {selectedMetric.drr !== null && (
+                    <div>
+                      <strong>ДРР:</strong> {formatPercent(selectedMetric.drr)}
+                    </div>
+                  )}
+                  {selectedMetric.rating !== null && (
+                    <div>
+                      <strong>Рейтинг:</strong> {selectedMetric.rating.toFixed(2)}
+                    </div>
+                  )}
+                  {selectedMetric.reviews_count !== null && (
+                    <div>
+                      <strong>Отзывы:</strong> {formatInt(selectedMetric.reviews_count)}
+                    </div>
+                  )}
                 </div>
-              )}
-              {selectedMetric.reviews_count && (
-                <div>
-                  <strong>Отзывы:</strong> {formatInt(selectedMetric.reviews_count)}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="dynamics">
+          <Card>
+            <CardHeader>
+              <CardTitle>Динамика</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Здесь появится динамика по Ozon. Пока можно ориентироваться на изменения в таблице или
+              открыть Summary.
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="problem">
+          <Card>
+            <CardHeader>
+              <CardTitle>Проблемные позиции</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Откройте <Link className="text-blue-600 hover:underline" href="/summary">Summary</Link>{' '}
+              чтобы увидеть проблемные товары и сигналы.
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ab-tests">
+          <Card>
+            <CardHeader>
+              <CardTitle>A/B тесты</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Перейдите в <Link className="text-blue-600 hover:underline" href="/ab-tests">A/B tests</Link>{' '}
+              для экспериментов по Ozon.
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

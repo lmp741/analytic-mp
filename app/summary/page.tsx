@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { formatInt, formatPercent, formatMoney, formatDelta } from '@/lib/utils/formatting';
+import {
+  formatInt,
+  formatPercent,
+  formatMoney,
+  getInvalidValueTooltip,
+} from '@/lib/utils/formatting';
+import { calcDeltaPercent } from '@/lib/utils/number';
+import { MetricCell } from '@/components/metric-cell';
 
 interface SummaryRow {
   artikul: string;
@@ -21,7 +28,10 @@ interface SummaryRow {
   delta_orders: number | null;
   delta_revenue: number | null;
   delta_drr: number | null;
+  delta_impressions: number | null;
+  delta_price_avg: number | null;
   signals: string[];
+  severity: number;
 }
 
 export default function SummaryPage() {
@@ -39,32 +49,41 @@ export default function SummaryPage() {
       const supabase = createClient();
 
       // Load settings
-      const { data: settingsData } = await supabase
+      const { data: settingsData, error: settingsError } = await supabase
         .from('settings')
         .select('*')
         .eq('id', 1)
-        .single();
+        .maybeSingle();
+      if (settingsError && settingsError.code !== 'PGRST116') {
+        throw settingsError;
+      }
       setSettings(settingsData);
 
       // Load WB latest
-      const { data: wbImport } = await supabase
+      const { data: wbImport, error: wbImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'WB')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (wbImportError && wbImportError.code !== 'PGRST116') {
+        throw wbImportError;
+      }
 
       // Load Ozon latest
-      const { data: ozonImport } = await supabase
+      const { data: ozonImport, error: ozonImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'OZON')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (ozonImportError && ozonImportError.code !== 'PGRST116') {
+        throw ozonImportError;
+      }
 
       if (!settingsData) {
         setLoading(false);
@@ -72,6 +91,13 @@ export default function SummaryPage() {
       }
 
       const minImpressions = settingsData.summary_min_impressions;
+      const ignorePrevZero = settingsData.ignore_prev_zero;
+      const maxRows = settingsData.summary_max_rows_per_mp ?? 50;
+
+      const calcDeltaPct = (current: number, previous: number | null | undefined) =>
+        calcDeltaPercent(current, previous ?? null, ignorePrevZero);
+
+      const toFraction = (pct: number | null) => (pct === null ? null : pct / 100);
 
       // Process WB
       if (wbImport) {
@@ -79,12 +105,15 @@ export default function SummaryPage() {
         prevWeekStart.setDate(prevWeekStart.getDate() - 7);
         const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-        const { data: prevWbImport } = await supabase
+        const { data: prevWbImport, error: prevWbError } = await supabase
           .from('imports')
           .select('id')
           .eq('marketplace', 'WB')
           .eq('period_start', prevWeekStartStr)
-          .single();
+          .maybeSingle();
+        if (prevWbError && prevWbError.code !== 'PGRST116') {
+          throw prevWbError;
+        }
 
         const { data: wbMetrics } = await supabase
           .from('weekly_metrics')
@@ -110,20 +139,44 @@ export default function SummaryPage() {
             const signals: string[] = [];
 
             if (prev) {
-              const ctrDelta = current.ctr - prev.ctr;
-              const crDelta = current.cr_to_cart - prev.cr_to_cart;
-              const ordersDelta = (current.orders - prev.orders) / (prev.orders || 1);
+              const ctrDelta = calcDeltaPct(current.ctr, prev.ctr);
+              const crDelta = calcDeltaPct(current.cr_to_cart, prev.cr_to_cart);
+              const ordersDelta = calcDeltaPct(current.orders, prev.orders);
               const revenueDelta =
-                current.revenue && prev.revenue
-                  ? (Number(current.revenue) - Number(prev.revenue)) / Number(prev.revenue)
+                current.revenue !== null && prev.revenue !== null
+                  ? calcDeltaPct(Number(current.revenue), Number(prev.revenue))
                   : null;
 
-              if (ctrDelta <= settingsData.ctr_drop_pct) signals.push('CTR');
-              if (crDelta <= settingsData.cr_to_cart_drop_pct) signals.push('CR');
-              if (ordersDelta <= settingsData.orders_drop_pct) signals.push('Orders');
-              if (revenueDelta !== null && revenueDelta <= settingsData.revenue_drop_pct)
+              if (toFraction(ctrDelta) !== null && toFraction(ctrDelta)! <= settingsData.ctr_drop_pct) {
+                signals.push('CTR');
+              }
+              if (toFraction(crDelta) !== null && toFraction(crDelta)! <= settingsData.cr_to_cart_drop_pct) {
+                signals.push('CR');
+              }
+              if (toFraction(ordersDelta) !== null && toFraction(ordersDelta)! <= settingsData.orders_drop_pct) {
+                signals.push('Orders');
+              }
+              if (toFraction(revenueDelta) !== null && toFraction(revenueDelta)! <= settingsData.revenue_drop_pct) {
                 signals.push('Revenue');
+              }
             }
+
+            const deltaImpressions = prev ? calcDeltaPct(current.impressions, prev.impressions) : null;
+            const deltaPriceAvg =
+              prev && current.price_avg !== null && prev.price_avg !== null
+                ? calcDeltaPct(Number(current.price_avg), Number(prev.price_avg))
+                : null;
+            const deltaCtr = prev ? calcDeltaPct(current.ctr, prev.ctr) : null;
+            const deltaCr = prev ? calcDeltaPct(current.cr_to_cart, prev.cr_to_cart) : null;
+            const deltaOrders = prev ? calcDeltaPct(current.orders, prev.orders) : null;
+            const deltaRevenue =
+              prev && current.revenue !== null && prev.revenue !== null
+                ? calcDeltaPct(Number(current.revenue), Number(prev.revenue))
+                : null;
+
+            const severity = [deltaCtr, deltaCr, deltaOrders, deltaRevenue]
+              .filter((value) => value !== null)
+              .reduce((sum, value) => sum + Math.abs(value as number), 0);
 
             return {
               artikul: current.artikul,
@@ -135,18 +188,20 @@ export default function SummaryPage() {
               orders: current.orders,
               revenue: current.revenue,
               drr: null,
-              delta_ctr: prev ? current.ctr - prev.ctr : null,
-              delta_cr_to_cart: prev ? current.cr_to_cart - prev.cr_to_cart : null,
-              delta_orders: prev ? current.orders - prev.orders : null,
-              delta_revenue:
-                prev && current.revenue && prev.revenue
-                  ? Number(current.revenue) - Number(prev.revenue)
-                  : null,
+              delta_ctr: deltaCtr,
+              delta_cr_to_cart: deltaCr,
+              delta_orders: deltaOrders,
+              delta_revenue: deltaRevenue,
               delta_drr: null,
+              delta_impressions: deltaImpressions,
+              delta_price_avg: deltaPriceAvg,
               signals: signals.slice(0, settingsData.max_zone_tags),
+              severity,
             };
           })
-          .filter((row) => row.signals.length > 0);
+          .filter((row) => row.signals.length > 0)
+          .sort((a, b) => b.severity - a.severity)
+          .slice(0, maxRows);
 
         setWbRows(wbSummary);
       }
@@ -157,12 +212,15 @@ export default function SummaryPage() {
         prevWeekStart.setDate(prevWeekStart.getDate() - 7);
         const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-        const { data: prevOzonImport } = await supabase
+        const { data: prevOzonImport, error: prevOzonError } = await supabase
           .from('imports')
           .select('id')
           .eq('marketplace', 'OZON')
           .eq('period_start', prevWeekStartStr)
-          .single();
+          .maybeSingle();
+        if (prevOzonError && prevOzonError.code !== 'PGRST116') {
+          throw prevOzonError;
+        }
 
         const { data: ozonMetrics } = await supabase
           .from('weekly_metrics')
@@ -188,26 +246,55 @@ export default function SummaryPage() {
             const signals: string[] = [];
 
             if (prev) {
-              const ctrDelta = current.ctr - prev.ctr;
-              const crDelta = current.cr_to_cart - prev.cr_to_cart;
-              const ordersDelta = (current.orders - prev.orders) / (prev.orders || 1);
+              const ctrDelta = calcDeltaPct(current.ctr, prev.ctr);
+              const crDelta = calcDeltaPct(current.cr_to_cart, prev.cr_to_cart);
+              const ordersDelta = calcDeltaPct(current.orders, prev.orders);
               const revenueDelta =
-                current.revenue && prev.revenue
-                  ? (Number(current.revenue) - Number(prev.revenue)) / Number(prev.revenue)
+                current.revenue !== null && prev.revenue !== null
+                  ? calcDeltaPct(Number(current.revenue), Number(prev.revenue))
                   : null;
               const drrDelta =
                 current.drr !== null && prev.drr !== null
-                  ? current.drr - prev.drr
+                  ? calcDeltaPct(current.drr, prev.drr)
                   : null;
 
-              if (ctrDelta <= settingsData.ctr_drop_pct) signals.push('CTR');
-              if (crDelta <= settingsData.cr_to_cart_drop_pct) signals.push('CR');
-              if (ordersDelta <= settingsData.orders_drop_pct) signals.push('Orders');
-              if (revenueDelta !== null && revenueDelta <= settingsData.revenue_drop_pct)
+              if (toFraction(ctrDelta) !== null && toFraction(ctrDelta)! <= settingsData.ctr_drop_pct) {
+                signals.push('CTR');
+              }
+              if (toFraction(crDelta) !== null && toFraction(crDelta)! <= settingsData.cr_to_cart_drop_pct) {
+                signals.push('CR');
+              }
+              if (toFraction(ordersDelta) !== null && toFraction(ordersDelta)! <= settingsData.orders_drop_pct) {
+                signals.push('Orders');
+              }
+              if (toFraction(revenueDelta) !== null && toFraction(revenueDelta)! <= settingsData.revenue_drop_pct) {
                 signals.push('Revenue');
-              if (drrDelta !== null && drrDelta >= settingsData.drr_worse_pct)
+              }
+              if (toFraction(drrDelta) !== null && toFraction(drrDelta)! >= settingsData.drr_worse_pct) {
                 signals.push('DRR');
+              }
             }
+
+            const deltaImpressions = prev ? calcDeltaPct(current.impressions, prev.impressions) : null;
+            const deltaPriceAvg =
+              prev && current.price_avg !== null && prev.price_avg !== null
+                ? calcDeltaPct(Number(current.price_avg), Number(prev.price_avg))
+                : null;
+            const deltaCtr = prev ? calcDeltaPct(current.ctr, prev.ctr) : null;
+            const deltaCr = prev ? calcDeltaPct(current.cr_to_cart, prev.cr_to_cart) : null;
+            const deltaOrders = prev ? calcDeltaPct(current.orders, prev.orders) : null;
+            const deltaRevenue =
+              prev && current.revenue !== null && prev.revenue !== null
+                ? calcDeltaPct(Number(current.revenue), Number(prev.revenue))
+                : null;
+            const deltaDrr =
+              prev && current.drr !== null && prev.drr !== null
+                ? calcDeltaPct(current.drr, prev.drr)
+                : null;
+
+            const severity = [deltaCtr, deltaCr, deltaOrders, deltaRevenue, deltaDrr]
+              .filter((value) => value !== null)
+              .reduce((sum, value) => sum + Math.abs(value as number), 0);
 
             return {
               artikul: current.artikul,
@@ -219,20 +306,20 @@ export default function SummaryPage() {
               orders: current.orders,
               revenue: current.revenue,
               drr: current.drr,
-              delta_ctr: prev ? current.ctr - prev.ctr : null,
-              delta_cr_to_cart: prev ? current.cr_to_cart - prev.cr_to_cart : null,
-              delta_orders: prev ? current.orders - prev.orders : null,
-              delta_revenue:
-                prev && current.revenue && prev.revenue
-                  ? Number(current.revenue) - Number(prev.revenue)
-                  : null,
-              delta_drr: prev && current.drr !== null && prev.drr !== null
-                ? current.drr - prev.drr
-                : null,
+              delta_ctr: deltaCtr,
+              delta_cr_to_cart: deltaCr,
+              delta_orders: deltaOrders,
+              delta_revenue: deltaRevenue,
+              delta_drr: deltaDrr,
+              delta_impressions: deltaImpressions,
+              delta_price_avg: deltaPriceAvg,
               signals: signals.slice(0, settingsData.max_zone_tags),
+              severity,
             };
           })
-          .filter((row) => row.signals.length > 0);
+          .filter((row) => row.signals.length > 0)
+          .sort((a, b) => b.severity - a.severity)
+          .slice(0, maxRows);
 
         setOzonRows(ozonSummary);
       }
@@ -302,39 +389,63 @@ export default function SummaryPage() {
               </thead>
               <tbody>
                 {wbRows.map((row) => {
-                  const ctrDelta = formatDelta(row.delta_ctr);
-                  const crDelta = formatDelta(row.delta_cr_to_cart);
                   return (
                     <tr key={row.artikul}>
                       <td className="border p-2 font-medium">{row.artikul}</td>
-                      <td className="border p-2">{formatInt(row.impressions)}</td>
-                      <td className="border p-2">{formatMoney(row.price_avg)}</td>
-                      <td className="border p-2">
-                        {formatPercent(row.ctr)}
-                        {ctrDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {ctrDelta.text}
-                          </span>
-                        )}
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.impressions) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(row.impressions)}
+                          deltaPct={row.delta_impressions}
+                        />
                       </td>
-                      <td className="border p-2">
-                        {formatPercent(row.cr_to_cart)}
-                        {crDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              crDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {crDelta.text}
-                          </span>
-                        )}
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.price_avg) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(row.price_avg)}
+                          deltaPct={row.delta_price_avg}
+                        />
                       </td>
-                      <td className="border p-2">{formatInt(row.orders)}</td>
-                      <td className="border p-2">{formatMoney(row.revenue)}</td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.ctr) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(row.ctr, 2)}
+                          deltaPct={row.delta_ctr}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.cr_to_cart) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(row.cr_to_cart, 2)}
+                          deltaPct={row.delta_cr_to_cart}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.orders) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(row.orders)}
+                          deltaPct={row.delta_orders}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.revenue) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(row.revenue)}
+                          deltaPct={row.delta_revenue}
+                        />
+                      </td>
                       <td className="border p-2">
                         {row.signals.map((s) => (
                           <span
@@ -389,39 +500,72 @@ export default function SummaryPage() {
               </thead>
               <tbody>
                 {ozonRows.map((row) => {
-                  const ctrDelta = formatDelta(row.delta_ctr);
-                  const drrDelta = formatDelta(row.delta_drr, true);
                   return (
                     <tr key={row.artikul}>
                       <td className="border p-2 font-medium">{row.artikul}</td>
-                      <td className="border p-2">{formatInt(row.impressions)}</td>
-                      <td className="border p-2">{formatMoney(row.price_avg)}</td>
-                      <td className="border p-2">
-                        {formatPercent(row.ctr)}
-                        {ctrDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {ctrDelta.text}
-                          </span>
-                        )}
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.impressions) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(row.impressions)}
+                          deltaPct={row.delta_impressions}
+                        />
                       </td>
-                      <td className="border p-2">{formatPercent(row.cr_to_cart)}</td>
-                      <td className="border p-2">{formatInt(row.orders)}</td>
-                      <td className="border p-2">{formatMoney(row.revenue)}</td>
-                      <td className="border p-2">
-                        {formatPercent(row.drr)}
-                        {drrDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              drrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {drrDelta.text}
-                          </span>
-                        )}
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.price_avg) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(row.price_avg)}
+                          deltaPct={row.delta_price_avg}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.ctr) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(row.ctr, 2)}
+                          deltaPct={row.delta_ctr}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.cr_to_cart) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(row.cr_to_cart, 2)}
+                          deltaPct={row.delta_cr_to_cart}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.orders) || undefined}
+                      >
+                        <MetricCell
+                          value={formatInt(row.orders)}
+                          deltaPct={row.delta_orders}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.revenue) || undefined}
+                      >
+                        <MetricCell
+                          value={formatMoney(row.revenue)}
+                          deltaPct={row.delta_revenue}
+                        />
+                      </td>
+                      <td
+                        className="border p-2"
+                        title={getInvalidValueTooltip(row.drr) || undefined}
+                      >
+                        <MetricCell
+                          value={formatPercent(row.drr, 2)}
+                          deltaPct={row.delta_drr}
+                          isInverted
+                        />
                       </td>
                       <td className="border p-2">
                         {row.signals.map((s) => (

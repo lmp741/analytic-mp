@@ -1,0 +1,2 @@
+ALTER TABLE settings
+  ADD COLUMN IF NOT EXISTS summary_max_rows_per_mp INTEGER NOT NULL DEFAULT 50;

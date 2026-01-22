@@ -3,34 +3,32 @@
  * Handles NaN, Infinity, null values consistently
  */
 
+import {
+  formatDeltaPercent,
+  formatMoneyRu,
+  formatNumberRu,
+  formatPercentRuFraction,
+} from '@/lib/utils/number';
+
 /**
  * Formats integer with thousand separators
  */
 export function formatInt(value: number | null | undefined): string {
-  if (value === null || value === undefined || isNaN(value) || !isFinite(value)) {
-    return '—';
-  }
-  return Math.round(value).toLocaleString('ru-RU');
+  return formatNumberRu(value ?? null);
 }
 
 /**
  * Formats money (RUB)
  */
 export function formatMoney(value: number | null | undefined): string {
-  if (value === null || value === undefined || isNaN(value) || !isFinite(value)) {
-    return '—';
-  }
-  return `${Math.round(value).toLocaleString('ru-RU')} ₽`;
+  return formatMoneyRu(value ?? null);
 }
 
 /**
  * Formats percent (0..1 fraction to percent)
  */
 export function formatPercent(value: number | null | undefined, decimals: number = 1): string {
-  if (value === null || value === undefined || isNaN(value) || !isFinite(value)) {
-    return '—';
-  }
-  return `${(value * 100).toFixed(decimals)}%`;
+  return formatPercentRuFraction(value ?? null, decimals);
 }
 
 /**
@@ -45,9 +43,8 @@ export function formatDelta(
   }
   
   const isPositive = isInverted ? value < 0 : value > 0;
-  const sign = value > 0 ? '+' : '';
   return {
-    text: `${sign}${formatPercent(value)}`,
+    text: formatDeltaPercent(value),
     isPositive,
   };
 }
