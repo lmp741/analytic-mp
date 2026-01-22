@@ -855,7 +855,7 @@ function formatDateLocal(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function validatePeriod(start: string, end: string): { valid: boolean; message?: string } {
+function validatePeriod(start: string, end: string): { valid: boolean; message: string } {
   if (!start || !end) {
     return { valid: false, message: 'Период не заполнен.' };
   }
@@ -872,7 +872,7 @@ function validatePeriod(start: string, end: string): { valid: boolean; message?:
   if (diffDays !== 6) {
     return { valid: false, message: 'Период должен быть ровно 7 дней (Пн–Вс).' };
   }
-  return { valid: true };
+  return { valid: true, message: '' };
 }
 
 function DiagnosticsAccordion({
