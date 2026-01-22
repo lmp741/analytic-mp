@@ -10,7 +10,8 @@ import {
   parsePercentToFraction,
   coerceInt,
   clampFraction,
-  findColumnIndex,
+  findHeaderRow,
+  pickColIndex,
   isValidArtikul,
   isTotalsRow,
   safeDiv,
@@ -38,12 +39,14 @@ export interface WBParseResult {
   periodEnd: Date | null;
   diagnostics: {
     sheetName: string | null;
+    headerRowIndex: number | null;
     totalRowsScanned: number;
     rowsAccepted: number;
     rowsSkipped: number;
     skipReasons: Record<string, number>;
     columnMapping: Record<string, string | null>;
     missingColumns: string[];
+    headerSample: string[];
   };
   errors: string[];
   warnings: string[];
@@ -120,12 +123,14 @@ export async function parseWBFile(file: File): Promise<WBParseResult> {
     periodEnd: null,
     diagnostics: {
       sheetName: null,
+      headerRowIndex: null,
       totalRowsScanned: 0,
       rowsAccepted: 0,
       rowsSkipped: 0,
       skipReasons: {},
       columnMapping: {},
       missingColumns: [],
+      headerSample: [],
     },
     errors: [],
     warnings: [],
@@ -149,40 +154,53 @@ export async function parseWBFile(file: File): Promise<WBParseResult> {
     result.diagnostics.sheetName = sheetName;
 
     const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
+    const data = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: true,
+      defval: null,
+    }) as any[][];
 
     if (data.length < 2) {
       result.errors.push('Файл не содержит данных (меньше 2 строк)');
       return result;
     }
 
-    // Find header row (first non-empty row)
-    let headerRowIndex = 0;
-    for (let i = 0; i < Math.min(10, data.length); i++) {
-      if (data[i] && data[i].some((cell) => cell !== null && cell !== '')) {
-        headerRowIndex = i;
-        break;
-      }
+    const headerRowIndex = findHeaderRow(data, {
+      maxRows: 50,
+      matcher: (cell) => cell.includes('артикул') && cell.includes('продав'),
+    });
+
+    if (headerRowIndex === null) {
+      result.errors.push(
+        'WB: не нашли строку шапки (ожидали колонку "Артикул продавца"). Проверьте файл.'
+      );
+      return result;
     }
+
+    result.diagnostics.headerRowIndex = headerRowIndex;
 
     const headers = data[headerRowIndex] || [];
     const normalizedHeaders = headers.map(normalizeHeader);
+    result.diagnostics.headerSample = headers
+      .map((header) => (header === null || header === undefined ? '' : String(header).trim()))
+      .filter((header) => header.length > 0)
+      .slice(0, 20);
 
     // Map columns
     const columnMap: Record<string, number | null> = {
-      artikul: findColumnIndex(normalizedHeaders, ['артикул', 'продав']),
-      impressions: findColumnIndex(normalizedHeaders, ['показы']),
-      visits: findColumnIndex(normalizedHeaders, ['переход', 'карточ']),
-      ctr: findColumnIndex(normalizedHeaders, ['ctr']),
-      add_to_cart: findColumnIndex(normalizedHeaders, ['корзин']),
-      cr_to_cart: findColumnIndex(normalizedHeaders, ['конверси', 'корзин']),
-      orders: findColumnIndex(normalizedHeaders, ['заказ', 'шт']),
-      revenue: findColumnIndex(normalizedHeaders, ['заказали на сумму', 'выруч']),
-      price_avg: findColumnIndex(normalizedHeaders, ['средняя цена']),
-      stock_end: findColumnIndex(normalizedHeaders, ['остатк', 'шт']),
-      delivery: findColumnIndex(normalizedHeaders, ['среднее время достав']),
-      rating: findColumnIndex(normalizedHeaders, ['рейтинг']),
-      reviews: findColumnIndex(normalizedHeaders, ['отзыв']),
+      artikul: pickColIndex(normalizedHeaders, [/артикул.*продав/, 'артикул продавца']),
+      impressions: pickColIndex(normalizedHeaders, ['показы']),
+      visits: pickColIndex(normalizedHeaders, [/переход.*карточ/, 'переходы в карточку']),
+      ctr: pickColIndex(normalizedHeaders, ['ctr']),
+      add_to_cart: pickColIndex(normalizedHeaders, [/положил.*корзин/, /добавил.*корзин/]),
+      cr_to_cart: pickColIndex(normalizedHeaders, [/конверс.*корзин/]),
+      orders: pickColIndex(normalizedHeaders, [/заказал.*шт/, 'заказали, шт']),
+      revenue: pickColIndex(normalizedHeaders, [/заказал.*сумм/, 'выручка']),
+      price_avg: pickColIndex(normalizedHeaders, ['средняя цена']),
+      stock_end: pickColIndex(normalizedHeaders, [/остаток.*конец/, /остатк.*шт/]),
+      delivery: pickColIndex(normalizedHeaders, [/среднее время достав/, 'среднее время доставки']),
+      rating: pickColIndex(normalizedHeaders, ['рейтинг']),
+      reviews: pickColIndex(normalizedHeaders, ['отзыв']),
     };
 
     // Store mapping for diagnostics
@@ -192,13 +210,28 @@ export async function parseWBFile(file: File): Promise<WBParseResult> {
     });
 
     // Check required columns
-    const required = ['artikul', 'impressions', 'visits'];
-    required.forEach((key) => {
+    const headerSampleText =
+      result.diagnostics.headerSample.length > 0
+        ? result.diagnostics.headerSample.join(', ')
+        : 'не найдено';
+    const requiredColumns: Array<{ key: string; label: string }> = [
+      { key: 'artikul', label: 'Артикул продавца' },
+      { key: 'impressions', label: 'Показы' },
+    ];
+    requiredColumns.forEach(({ key, label }) => {
       if (columnMap[key] === null) {
         result.diagnostics.missingColumns.push(key);
-        result.errors.push(`Обязательная колонка "${key}" не найдена`);
+        result.errors.push(
+          `WB: не нашли колонку "${label}". Найденные заголовки: ${headerSampleText}`
+        );
       }
     });
+
+    if (columnMap.visits === null) {
+      result.warnings.push(
+        `WB: не нашли колонку "Переходы в карточку". CTR будет рассчитан от показов.`
+      );
+    }
 
     if (result.errors.length > 0) {
       return result;
@@ -230,10 +263,15 @@ export async function parseWBFile(file: File): Promise<WBParseResult> {
       }
 
       // Parse values
-      const impressions = coerceInt(parseNumberRU(row[columnMap.impressions!]));
-      const visits = coerceInt(parseNumberRU(row[columnMap.visits!]));
+      const impressions = coerceInt(
+        parseNumberRU(columnMap.impressions !== null ? row[columnMap.impressions] : null)
+      );
+      const visits = coerceInt(
+        parseNumberRU(columnMap.visits !== null ? row[columnMap.visits] : null)
+      );
+      const visitsValue = visits ?? 0;
 
-      if (impressions === null || visits === null) {
+      if (impressions === null) {
         result.diagnostics.rowsSkipped++;
         result.diagnostics.skipReasons['missing_required'] =
           (result.diagnostics.skipReasons['missing_required'] || 0) + 1;
@@ -241,38 +279,54 @@ export async function parseWBFile(file: File): Promise<WBParseResult> {
       }
 
       // Parse optional fields
-      const ctrRaw = row[columnMap.ctr!];
+      const ctrRaw = columnMap.ctr !== null ? row[columnMap.ctr] : null;
       let ctr: number;
       if (ctrRaw !== null && ctrRaw !== undefined) {
         const parsed = parsePercentToFraction(ctrRaw);
-        ctr = clampFraction(parsed) ?? safeDiv(visits, impressions) ?? 0;
+        ctr = clampFraction(parsed) ?? safeDiv(visitsValue, impressions) ?? 0;
       } else {
-        ctr = safeDiv(visits, impressions) ?? 0;
+        ctr = safeDiv(visitsValue, impressions) ?? 0;
       }
 
-      const add_to_cart = coerceInt(parseNumberRU(row[columnMap.add_to_cart!])) ?? 0;
-      const cr_to_cart_raw = row[columnMap.cr_to_cart!];
+      const add_to_cart =
+        coerceInt(
+          parseNumberRU(
+            columnMap.add_to_cart !== null ? row[columnMap.add_to_cart] : null
+          )
+        ) ?? 0;
+      const cr_to_cart_raw =
+        columnMap.cr_to_cart !== null ? row[columnMap.cr_to_cart] : null;
       let cr_to_cart: number;
       if (cr_to_cart_raw !== null && cr_to_cart_raw !== undefined) {
         const parsed = parsePercentToFraction(cr_to_cart_raw);
-        cr_to_cart = clampFraction(parsed) ?? safeDiv(add_to_cart, visits) ?? 0;
+        cr_to_cart = clampFraction(parsed) ?? safeDiv(add_to_cart, visitsValue) ?? 0;
       } else {
-        cr_to_cart = safeDiv(add_to_cart, visits) ?? 0;
+        cr_to_cart = safeDiv(add_to_cart, visitsValue) ?? 0;
       }
 
-      const orders = coerceInt(parseNumberRU(row[columnMap.orders!])) ?? 0;
-      const revenue = parseNumberRU(row[columnMap.revenue!]);
-      const price_avg = parseNumberRU(row[columnMap.price_avg!]);
-      const stock_end = coerceInt(parseNumberRU(row[columnMap.stock_end!]));
-      const delivery_raw = parseNumberRU(row[columnMap.delivery!]);
+      const orders =
+        coerceInt(parseNumberRU(columnMap.orders !== null ? row[columnMap.orders] : null)) ??
+        0;
+      const revenue = parseNumberRU(columnMap.revenue !== null ? row[columnMap.revenue] : null);
+      const price_avg = parseNumberRU(
+        columnMap.price_avg !== null ? row[columnMap.price_avg] : null
+      );
+      const stock_end = coerceInt(
+        parseNumberRU(columnMap.stock_end !== null ? row[columnMap.stock_end] : null)
+      );
+      const delivery_raw = parseNumberRU(
+        columnMap.delivery !== null ? row[columnMap.delivery] : null
+      );
       const delivery_avg_hours = delivery_raw !== null ? delivery_raw : null;
-      const rating = parseNumberRU(row[columnMap.rating!]);
-      const reviews_count = coerceInt(parseNumberRU(row[columnMap.reviews!]));
+      const rating = parseNumberRU(columnMap.rating !== null ? row[columnMap.rating] : null);
+      const reviews_count = coerceInt(
+        parseNumberRU(columnMap.reviews !== null ? row[columnMap.reviews] : null)
+      );
 
       result.rows.push({
         artikul,
         impressions,
-        visits,
+        visits: visitsValue,
         ctr,
         add_to_cart,
         cr_to_cart,

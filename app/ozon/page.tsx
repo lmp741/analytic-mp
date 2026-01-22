@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatInt, formatPercent, formatMoney, formatDelta } from '@/lib/utils/formatting';
+import {
+  formatInt,
+  formatPercent,
+  formatMoney,
+  formatDelta,
+  getInvalidValueTooltip,
+} from '@/lib/utils/formatting';
 
 interface WeeklyMetric {
   artikul: string;
@@ -181,7 +187,10 @@ export default function OzonDashboard() {
                   <td className="border p-2 sticky left-0 bg-background font-medium">
                     {metric.artikul}
                   </td>
-                  <td className="border p-2">
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.impressions) || undefined}
+                  >
                     {formatInt(metric.impressions)}
                     {impressionsDelta.isPositive !== null && (
                       <span
@@ -193,8 +202,16 @@ export default function OzonDashboard() {
                       </span>
                     )}
                   </td>
-                  <td className="border p-2">{formatInt(metric.visits)}</td>
-                  <td className="border p-2">
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.visits) || undefined}
+                  >
+                    {formatInt(metric.visits)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.ctr) || undefined}
+                  >
                     {formatPercent(metric.ctr)}
                     {ctrDelta.isPositive !== null && (
                       <span
@@ -206,12 +223,40 @@ export default function OzonDashboard() {
                       </span>
                     )}
                   </td>
-                  <td className="border p-2">{formatInt(metric.add_to_cart)}</td>
-                  <td className="border p-2">{formatPercent(metric.cr_to_cart)}</td>
-                  <td className="border p-2">{formatInt(metric.orders)}</td>
-                  <td className="border p-2">{formatMoney(metric.revenue)}</td>
-                  <td className="border p-2">{formatMoney(metric.price_avg)}</td>
-                  <td className="border p-2">
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.add_to_cart) || undefined}
+                  >
+                    {formatInt(metric.add_to_cart)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.cr_to_cart) || undefined}
+                  >
+                    {formatPercent(metric.cr_to_cart)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.orders) || undefined}
+                  >
+                    {formatInt(metric.orders)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.revenue) || undefined}
+                  >
+                    {formatMoney(metric.revenue)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.price_avg) || undefined}
+                  >
+                    {formatMoney(metric.price_avg)}
+                  </td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.drr) || undefined}
+                  >
                     {formatPercent(metric.drr)}
                     {drrDelta.isPositive !== null && (
                       <span
@@ -223,7 +268,12 @@ export default function OzonDashboard() {
                       </span>
                     )}
                   </td>
-                  <td className="border p-2">{formatInt(metric.stock_end)}</td>
+                  <td
+                    className="border p-2"
+                    title={getInvalidValueTooltip(metric.stock_end) || undefined}
+                  >
+                    {formatInt(metric.stock_end)}
+                  </td>
                 </tr>
               );
             })}

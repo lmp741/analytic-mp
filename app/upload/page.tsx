@@ -1,14 +1,45 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { parseWBFile, type WBParseResult } from '@/lib/parsers/wb';
 import { parseOzonFile, type OzonParseResult } from '@/lib/parsers/ozon';
 import { computeFileHash } from '@/lib/utils/hash';
-import { formatInt, formatPercent, formatMoney } from '@/lib/utils/formatting';
+import {
+  formatInt,
+  formatPercent,
+  formatMoney,
+  getInvalidValueTooltip,
+} from '@/lib/utils/formatting';
 
 type UploadState = 'idle' | 'parsing' | 'parsed' | 'importing' | 'imported' | 'error';
+type StatusLevel = 'idle' | 'ok' | 'warn' | 'error';
+
+const statusConfig: Record<StatusLevel, { label: string; className: string }> = {
+  idle: { label: '⚪️ WAIT', className: 'text-muted-foreground' },
+  ok: { label: '✅ OK', className: 'text-emerald-600' },
+  warn: { label: '🟡 WARN', className: 'text-amber-600' },
+  error: { label: '🔴 ERROR', className: 'text-red-600' },
+};
+
+const columnLabels: Record<string, string> = {
+  artikul: 'Артикул продавца',
+  impressions: 'Показы',
+  visits: 'Переходы в карточку',
+  ctr: 'CTR',
+  add_to_cart: 'Положили в корзину',
+  cr_to_cart: 'Конверсия в корзину, %',
+  orders: 'Заказали, шт',
+  revenue: 'Выручка / Заказали на сумму',
+  price_avg: 'Средняя цена, ₽',
+  stock_end: 'Остаток (конец)',
+  delivery: 'Среднее время доставки',
+  rating: 'Рейтинг',
+  reviews: 'Отзывы',
+  drr: 'ДРР',
+};
 
 export default function UploadPage() {
   const [wbFile, setWbFile] = useState<File | null>(null);
@@ -18,10 +49,7 @@ export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const handleWbFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const parseWbFile = async (file: File) => {
     setWbFile(file);
     setState('parsing');
     setError(null);
@@ -41,10 +69,7 @@ export default function UploadPage() {
     }
   };
 
-  const handleOzonFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const parseOzonFileInput = async (file: File) => {
     setOzonFile(file);
     setState('parsing');
     setError(null);
@@ -72,6 +97,13 @@ export default function UploadPage() {
 
   const handleImport = async () => {
     if (!wbResult && !ozonResult) return;
+    if (overallStatus === 'error') return;
+    if (overallStatus === 'warn') {
+      const proceed = window.confirm(
+        'Обнаружены предупреждения. Импортировать несмотря на WARN?'
+      );
+      if (!proceed) return;
+    }
     
     // Check for existing imports and show confirmation
     // For now, proceed with import
@@ -138,6 +170,8 @@ export default function UploadPage() {
           end: wbResult.periodEnd?.toISOString(),
         } : null,
         mapping: wbResult.diagnostics.columnMapping,
+        header_row_index: wbResult.diagnostics.headerRowIndex,
+        header_sample: wbResult.diagnostics.headerSample,
         stats: {
           totalRowsScanned: wbResult.diagnostics.totalRowsScanned,
           rowsAccepted: wbResult.diagnostics.rowsAccepted,
@@ -156,6 +190,7 @@ export default function UploadPage() {
           end: ozonResult.periodEnd?.toISOString(),
         } : null,
         mapping: ozonResult.diagnostics.columnMapping,
+        header_row_index: ozonResult.diagnostics.headerStartRow,
         stats: {
           totalRowsScanned: ozonResult.diagnostics.totalRowsScanned,
           rowsAccepted: ozonResult.diagnostics.rowsAccepted,
@@ -178,50 +213,69 @@ export default function UploadPage() {
     URL.revokeObjectURL(url);
   };
 
+  const getStatus = (result: { errors: string[]; warnings: string[] } | null): StatusLevel => {
+    if (!result) return 'idle';
+    if (result.errors.length > 0) return 'error';
+    if (result.warnings.length > 0) return 'warn';
+    return 'ok';
+  };
+
+  const wbStatus = getStatus(wbResult);
+  const ozonStatus = getStatus(ozonResult);
+  const overallStatus =
+    wbStatus === 'error' || ozonStatus === 'error'
+      ? 'error'
+      : wbStatus === 'warn' || ozonStatus === 'warn'
+        ? 'warn'
+        : wbStatus === 'ok' || ozonStatus === 'ok'
+          ? 'ok'
+          : 'idle';
+
+  const dryRunComplete = (!wbFile || wbResult) && (!ozonFile || ozonResult);
+  const canImport = dryRunComplete && overallStatus !== 'error' && state !== 'importing';
+
   return (
     <div className="container mx-auto p-8 max-w-6xl">
       <h1 className="text-3xl font-bold mb-8">Загрузка данных</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Wildberries</CardTitle>
-            <CardDescription>Загрузите отчет WB</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <input
-              type="file"
-              accept=".xlsx,.csv"
-              onChange={handleWbFileChange}
-              className="mb-4"
-            />
-            {wbFile && (
-              <div className="text-sm text-muted-foreground">
-                Файл: {wbFile.name} ({(wbFile.size / 1024).toFixed(2)} KB)
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="mb-8 rounded-lg border bg-muted/30 px-6 py-4">
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          {[
+            { label: 'WB', done: !!wbResult },
+            { label: 'Ozon', done: !!ozonResult },
+            { label: 'Dry-run', done: dryRunComplete },
+            { label: 'Import', done: state === 'imported' },
+          ].map((step, index) => (
+            <div key={step.label} className="flex items-center gap-2">
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-full border text-sm font-semibold ${
+                  step.done ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white'
+                }`}
+              >
+                {index + 1}
+              </span>
+              <span className="font-medium">{step.label}</span>
+              {index < 3 && <span className="text-muted-foreground">→</span>}
+            </div>
+          ))}
+        </div>
+      </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Ozon</CardTitle>
-            <CardDescription>Загрузите отчет Ozon</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <input
-              type="file"
-              accept=".xlsx,.csv"
-              onChange={handleOzonFileChange}
-              className="mb-4"
-            />
-            {ozonFile && (
-              <div className="text-sm text-muted-foreground">
-                Файл: {ozonFile.name} ({(ozonFile.size / 1024).toFixed(2)} KB)
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <UploadCard
+          title="Wildberries"
+          description="Лист “Товары”, русские заголовки"
+          file={wbFile}
+          status={wbStatus}
+          onFile={parseWbFile}
+        />
+        <UploadCard
+          title="Ozon"
+          description="Загрузите отчет Ozon"
+          file={ozonFile}
+          status={ozonStatus}
+          onFile={parseOzonFileInput}
+        />
       </div>
 
       {error && (
@@ -238,7 +292,7 @@ export default function UploadPage() {
             <Button onClick={handleDryRun} variant="outline">
               Dry-run (Validate & Preview)
             </Button>
-            <Button onClick={handleImport} disabled={state === 'importing'}>
+            <Button onClick={handleImport} disabled={!canImport}>
               {state === 'importing' ? 'Импорт...' : 'Import to database'}
             </Button>
             <Button onClick={downloadDiagnostics} variant="secondary">
@@ -250,25 +304,29 @@ export default function UploadPage() {
             <Card>
               <CardHeader>
                 <CardTitle>WB Diagnostics</CardTitle>
+                <div className={`text-sm font-medium ${statusConfig[wbStatus].className}`}>
+                  {statusConfig[wbStatus].label}
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <strong>Sheet:</strong> {wbResult.diagnostics.sheetName || 'N/A'}
-                  </div>
-                  <div>
-                    <strong>Period:</strong>{' '}
-                    {wbResult.periodStart
-                      ? `${wbResult.periodStart.toLocaleDateString('ru-RU')} - ${wbResult.periodEnd?.toLocaleDateString('ru-RU')}`
-                      : 'Не обнаружен'}
-                  </div>
-                  <div>
-                    <strong>Rows:</strong> {wbResult.diagnostics.rowsAccepted} accepted,{' '}
-                    {wbResult.diagnostics.rowsSkipped} skipped
-                  </div>
-                  {wbResult.rows.length > 0 && (
-                    <div>
-                      <strong>Preview (first 5 rows):</strong>
+                <DiagnosticsAccordion
+                  file={wbFile}
+                  periodStart={wbResult.periodStart}
+                  periodEnd={wbResult.periodEnd}
+                  diagnostics={{
+                    sheetName: wbResult.diagnostics.sheetName,
+                    headerRowIndex: wbResult.diagnostics.headerRowIndex,
+                    totalRowsScanned: wbResult.diagnostics.totalRowsScanned,
+                    rowsAccepted: wbResult.diagnostics.rowsAccepted,
+                    rowsSkipped: wbResult.diagnostics.rowsSkipped,
+                    skipReasons: wbResult.diagnostics.skipReasons,
+                    headerSample: wbResult.diagnostics.headerSample,
+                    columnMapping: wbResult.diagnostics.columnMapping,
+                  }}
+                  errors={wbResult.errors}
+                  warnings={wbResult.warnings}
+                  preview={
+                    wbResult.rows.length > 0 && (
                       <table className="mt-2 w-full text-sm border">
                         <thead>
                           <tr className="bg-muted">
@@ -284,18 +342,43 @@ export default function UploadPage() {
                           {wbResult.rows.slice(0, 5).map((row, idx) => (
                             <tr key={idx}>
                               <td className="border p-2">{row.artikul}</td>
-                              <td className="border p-2">{formatInt(row.impressions)}</td>
-                              <td className="border p-2">{formatInt(row.visits)}</td>
-                              <td className="border p-2">{formatPercent(row.ctr)}</td>
-                              <td className="border p-2">{formatInt(row.orders)}</td>
-                              <td className="border p-2">{formatMoney(row.revenue)}</td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.impressions) || undefined}
+                              >
+                                {formatInt(row.impressions)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.visits) || undefined}
+                              >
+                                {formatInt(row.visits)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.ctr) || undefined}
+                              >
+                                {formatPercent(row.ctr)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.orders) || undefined}
+                              >
+                                {formatInt(row.orders)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.revenue) || undefined}
+                              >
+                                {formatMoney(row.revenue)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
-                    </div>
-                  )}
-                </div>
+                    )
+                  }
+                />
               </CardContent>
             </Card>
           )}
@@ -304,29 +387,32 @@ export default function UploadPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Ozon Diagnostics</CardTitle>
+                <div className={`text-sm font-medium ${statusConfig[ozonStatus].className}`}>
+                  {statusConfig[ozonStatus].label}
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <strong>Sheet:</strong> {ozonResult.diagnostics.sheetName || 'N/A'}
-                  </div>
-                  <div>
-                    <strong>Period:</strong>{' '}
-                    {ozonResult.periodStart
-                      ? `${ozonResult.periodStart.toLocaleDateString('ru-RU')} - ${ozonResult.periodEnd?.toLocaleDateString('ru-RU')}`
-                      : 'Не обнаружен'}
-                  </div>
-                  <div>
-                    <strong>Rows:</strong> {ozonResult.diagnostics.rowsAccepted} accepted,{' '}
-                    {ozonResult.diagnostics.rowsSkipped} skipped
-                  </div>
-                  <div>
-                    <strong>Duplicates aggregated:</strong>{' '}
-                    {ozonResult.diagnostics.duplicatesAggregated}
-                  </div>
-                  {ozonResult.rows.length > 0 && (
-                    <div>
-                      <strong>Preview (first 5 rows):</strong>
+                <DiagnosticsAccordion
+                  file={ozonFile}
+                  periodStart={ozonResult.periodStart}
+                  periodEnd={ozonResult.periodEnd}
+                  diagnostics={{
+                    sheetName: ozonResult.diagnostics.sheetName,
+                    headerRowIndex: ozonResult.diagnostics.headerStartRow,
+                    totalRowsScanned: ozonResult.diagnostics.totalRowsScanned,
+                    rowsAccepted: ozonResult.diagnostics.rowsAccepted,
+                    rowsSkipped: ozonResult.diagnostics.rowsSkipped,
+                    skipReasons: {
+                      ...ozonResult.diagnostics.skipReasons,
+                      duplicates_aggregated: ozonResult.diagnostics.duplicatesAggregated,
+                    },
+                    headerSample: [],
+                    columnMapping: ozonResult.diagnostics.columnMapping,
+                  }}
+                  errors={ozonResult.errors}
+                  warnings={ozonResult.warnings}
+                  preview={
+                    ozonResult.rows.length > 0 && (
                       <table className="mt-2 w-full text-sm border">
                         <thead>
                           <tr className="bg-muted">
@@ -343,23 +429,245 @@ export default function UploadPage() {
                           {ozonResult.rows.slice(0, 5).map((row, idx) => (
                             <tr key={idx}>
                               <td className="border p-2">{row.artikul}</td>
-                              <td className="border p-2">{formatInt(row.impressions)}</td>
-                              <td className="border p-2">{formatInt(row.visits)}</td>
-                              <td className="border p-2">{formatPercent(row.ctr)}</td>
-                              <td className="border p-2">{formatInt(row.orders)}</td>
-                              <td className="border p-2">{formatMoney(row.revenue)}</td>
-                              <td className="border p-2">{formatPercent(row.drr)}</td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.impressions) || undefined}
+                              >
+                                {formatInt(row.impressions)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.visits) || undefined}
+                              >
+                                {formatInt(row.visits)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.ctr) || undefined}
+                              >
+                                {formatPercent(row.ctr)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.orders) || undefined}
+                              >
+                                {formatInt(row.orders)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.revenue) || undefined}
+                              >
+                                {formatMoney(row.revenue)}
+                              </td>
+                              <td
+                                className="border p-2"
+                                title={getInvalidValueTooltip(row.drr) || undefined}
+                              >
+                                {formatPercent(row.drr)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
-                    </div>
-                  )}
-                </div>
+                    )
+                  }
+                />
               </CardContent>
             </Card>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function UploadCard({
+  title,
+  description,
+  file,
+  status,
+  onFile,
+}: {
+  title: string;
+  description: string;
+  file: File | null;
+  status: StatusLevel;
+  onFile: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    if (droppedFile) {
+      onFile(droppedFile);
+    }
+  };
+
+  return (
+    <Card
+      className={`border-2 border-dashed transition ${
+        isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/20'
+      }`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+    >
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          <span className={`text-sm font-medium ${statusConfig[status].className}`}>
+            {statusConfig[status].label}
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+          Перетащите файл сюда или нажмите кнопку ниже
+        </div>
+        <Input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.csv"
+          onChange={(event) => {
+            const selectedFile = event.target.files?.[0];
+            if (selectedFile) {
+              onFile(selectedFile);
+            }
+          }}
+          className="hidden"
+        />
+        <Button type="button" variant="secondary" onClick={() => inputRef.current?.click()}>
+          Выбрать файл
+        </Button>
+        {file && (
+          <div className="text-sm text-muted-foreground">
+            Файл: {file.name} ({(file.size / 1024).toFixed(2)} KB)
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DiagnosticsAccordion({
+  file,
+  periodStart,
+  periodEnd,
+  diagnostics,
+  errors,
+  warnings,
+  preview,
+}: {
+  file: File | null;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  diagnostics: {
+    sheetName: string | null;
+    headerRowIndex: number | null;
+    totalRowsScanned: number;
+    rowsAccepted: number;
+    rowsSkipped: number;
+    skipReasons: Record<string, number>;
+    headerSample: string[];
+    columnMapping: Record<string, string | null>;
+  };
+  errors: string[];
+  warnings: string[];
+  preview: ReactNode;
+}) {
+  return (
+    <div className="space-y-3">
+      {(errors.length > 0 || warnings.length > 0) && (
+        <div className="rounded-md border bg-muted/40 p-3 text-sm">
+          {errors.length > 0 && (
+            <div className="text-red-600">
+              Ошибки: {errors.join('; ')}
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="text-amber-600">
+              Предупреждения: {warnings.join('; ')}
+            </div>
+          )}
+        </div>
+      )}
+      <details open className="rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Файл</summary>
+        <div className="mt-3 space-y-2 text-sm">
+          <div>
+            <strong>Имя:</strong> {file?.name || '—'}
+          </div>
+          <div>
+            <strong>Sheet:</strong> {diagnostics.sheetName || 'N/A'}
+          </div>
+          <div>
+            <strong>Строка шапки:</strong>{' '}
+            {diagnostics.headerRowIndex !== null
+              ? `${diagnostics.headerRowIndex + 1} (index ${diagnostics.headerRowIndex})`
+              : '—'}
+          </div>
+          {diagnostics.headerSample.length > 0 && (
+            <div>
+              <strong>Первые заголовки:</strong> {diagnostics.headerSample.join(', ')}
+            </div>
+          )}
+        </div>
+      </details>
+      <details className="rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Период</summary>
+        <div className="mt-3 text-sm">
+          {periodStart
+            ? `${periodStart.toLocaleDateString('ru-RU')} - ${periodEnd?.toLocaleDateString('ru-RU')}`
+            : 'Не обнаружен'}
+        </div>
+      </details>
+      <details className="rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Колонки</summary>
+        <div className="mt-3 grid gap-2 text-sm">
+          {Object.entries(diagnostics.columnMapping).map(([key, value]) => (
+            <div key={key} className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">{columnLabels[key] || key}</span>
+              <span className="font-medium">{value || '—'}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+      <details className="rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Строки</summary>
+        <div className="mt-3 space-y-2 text-sm">
+          <div>
+            <strong>Rows scanned:</strong> {diagnostics.totalRowsScanned}
+          </div>
+          <div>
+            <strong>Rows accepted:</strong> {diagnostics.rowsAccepted}
+          </div>
+          <div>
+            <strong>Rows skipped:</strong> {diagnostics.rowsSkipped}
+          </div>
+          {Object.keys(diagnostics.skipReasons).length > 0 && (
+            <div>
+              <strong>Причины пропуска:</strong>{' '}
+              {Object.entries(diagnostics.skipReasons)
+                .map(([reason, count]) => `${reason}: ${count}`)
+                .join(', ')}
+            </div>
+          )}
+        </div>
+      </details>
+      {preview && (
+        <details className="rounded-lg border p-4">
+          <summary className="cursor-pointer text-sm font-semibold">Превью</summary>
+          <div className="mt-3">{preview}</div>
+        </details>
       )}
     </div>
   );

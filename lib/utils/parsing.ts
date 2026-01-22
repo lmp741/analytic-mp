@@ -11,6 +11,7 @@ export function normalizeHeader(str: string | null | undefined): string {
   return str
     .toString()
     .trim()
+    .replace(/[\u00a0]/g, ' ')
     .replace(/[\n\r]+/g, ' ')
     .replace(/\s+/g, ' ')
     .toLowerCase();
@@ -41,11 +42,15 @@ export function parseNumberRU(value: any): number | null {
   
   // Remove currency and percent symbols
   str = str.replace(/[₽%]/g, '');
+  str = str.replace(/[\u00a0]/g, ' ');
   
   // Remove spaces (thousand separators)
   str = str.replace(/\s/g, '');
   
   // Replace comma with dot for decimal
+  if (str.includes(',') && str.includes('.')) {
+    str = str.replace(/\./g, '');
+  }
   str = str.replace(',', '.');
   
   // Remove any remaining non-numeric characters except dot and minus
@@ -76,6 +81,52 @@ export function parsePercentToFraction(value: any): number | null {
   }
   
   // Out of range
+  return null;
+}
+
+/**
+ * Finds header row index by matching normalized cell values.
+ */
+export function findHeaderRow(
+  rows: any[][],
+  options: {
+    maxRows?: number;
+    matcher: (normalizedCell: string) => boolean;
+  }
+): number | null {
+  const maxRows = Math.min(options.maxRows ?? 50, rows.length - 1);
+  for (let i = 0; i <= maxRows; i++) {
+    const row = rows[i] || [];
+    for (const cell of row) {
+      const normalized = normalizeHeader(cell);
+      if (normalized && options.matcher(normalized)) {
+        return i;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Picks column index by matching candidate strings/regex against normalized headers.
+ */
+export function pickColIndex(
+  headers: string[],
+  candidates: Array<string | RegExp>
+): number | null {
+  for (const candidate of candidates) {
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i];
+      if (!header) continue;
+      if (typeof candidate === 'string') {
+        if (header.includes(candidate.toLowerCase())) {
+          return i;
+        }
+      } else if (candidate.test(header)) {
+        return i;
+      }
+    }
+  }
   return null;
 }
 
