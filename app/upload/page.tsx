@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Accordion, AccordionItem } from '@/components/ui/accordion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { parseWBFile, type WBParseResult } from '@/lib/parsers/wb';
 import { parseOzonFile, type OzonParseResult } from '@/lib/parsers/ozon';
 import { computeFileHash } from '@/lib/utils/hash';
+import { createClient } from '@/lib/supabase/client';
 import {
   formatInt,
   formatPercent,
@@ -19,6 +20,10 @@ import { cn } from '@/lib/utils/cn';
 
 type UploadState = 'idle' | 'parsing' | 'parsed' | 'importing' | 'imported' | 'error';
 type StatusLevel = 'idle' | 'ok' | 'warn' | 'error';
+type DbHealth = {
+  status: 'checking' | 'ok' | 'error';
+  details: string[];
+};
 
 const statusConfig: Record<StatusLevel, { label: string; className: string }> = {
   idle: { label: '⚪️ WAIT', className: 'text-muted-foreground' },
@@ -67,6 +72,38 @@ export default function UploadPage() {
   const [ozonResult, setOzonResult] = useState<OzonParseResult | null>(null);
   const [state, setState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [dbHealth, setDbHealth] = useState<DbHealth>({ status: 'checking', details: [] });
+
+  useEffect(() => {
+    const checkDbHealth = async () => {
+      const supabase = createClient();
+      const issues: string[] = [];
+
+      const { error: importsError } = await supabase
+        .from('imports')
+        .select('id', { count: 'exact', head: true })
+        .limit(1);
+      if (importsError) {
+        issues.push('imports table missing or inaccessible');
+      }
+
+      const { error: metricsError } = await supabase
+        .from('weekly_metrics')
+        .select('id', { count: 'exact', head: true })
+        .limit(1);
+      if (metricsError) {
+        issues.push('weekly_metrics table missing or inaccessible');
+      }
+
+      setDbHealth(
+        issues.length > 0
+          ? { status: 'error', details: issues }
+          : { status: 'ok', details: [] }
+      );
+    };
+
+    checkDbHealth();
+  }, []);
 
   const parseWbFile = async (file: File) => {
     setWbFile(file);
@@ -130,6 +167,8 @@ export default function UploadPage() {
     setError(null);
 
     try {
+      let importedCount = 0;
+
       // Import WB if available
       if (wbFile && wbResult && wbResult.periodStart && wbResult.periodEnd) {
         const wbHash = await computeFileHash(wbFile);
@@ -149,6 +188,11 @@ export default function UploadPage() {
           const error = await wbResponse.json();
           throw new Error(error.error || 'WB import failed');
         }
+        const wbPayload = await wbResponse.json();
+        if (!wbPayload.metricsCount || wbPayload.metricsCount === 0) {
+          throw new Error('WB import failed: no metrics saved');
+        }
+        importedCount += 1;
       }
 
       // Import Ozon if available
@@ -170,9 +214,18 @@ export default function UploadPage() {
           const error = await ozonResponse.json();
           throw new Error(error.error || 'Ozon import failed');
         }
+        const ozonPayload = await ozonResponse.json();
+        if (!ozonPayload.metricsCount || ozonPayload.metricsCount === 0) {
+          throw new Error('Ozon import failed: no metrics saved');
+        }
+        importedCount += 1;
       }
 
-      setState('imported');
+      if (importedCount > 0) {
+        setState('imported');
+      } else {
+        throw new Error('Импорт не завершён: записи не были сохранены');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка импорта');
       setState('error');
@@ -259,6 +312,20 @@ export default function UploadPage() {
   return (
     <div className="container mx-auto p-8 max-w-6xl">
       <h1 className="text-3xl font-bold mb-8">Загрузка данных</h1>
+
+      {dbHealth.status === 'error' && (
+        <Card className="mb-6 border-destructive bg-destructive/5">
+          <CardHeader>
+            <CardTitle className="text-destructive">DB schema not applied</CardTitle>
+            <CardDescription>
+              Таблицы Supabase не найдены. Примените миграции, иначе импорт не сохранит данные.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-destructive">
+            {dbHealth.details.join('; ')}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mb-8 rounded-lg border bg-muted/30 px-6 py-4">
         <div className="flex flex-wrap items-center gap-4 text-sm">

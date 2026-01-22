@@ -17,12 +17,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if import already exists
-    const { data: existingImport } = await supabase
+    const { data: existingImport, error: existingError } = await supabase
       .from('imports')
       .select('id')
       .eq('marketplace', marketplace)
       .eq('period_start', periodStart)
       .single();
+    if (existingError && existingError.code !== 'PGRST116') {
+      throw existingError;
+    }
 
     let importId: string;
 
@@ -44,10 +47,11 @@ export async function POST(request: NextRequest) {
       importId = updated.id;
 
       // Delete existing metrics
-      await supabase
+      const { error: deleteError } = await supabase
         .from('weekly_metrics')
         .delete()
         .eq('import_id', importId);
+      if (deleteError) throw deleteError;
     } else {
       // Create new import
       const { data: newImport, error: createError } = await supabase
@@ -69,9 +73,10 @@ export async function POST(request: NextRequest) {
     // Upsert SKUs
     const artikuls = [...new Set(rows.map((r: any) => r.artikul))];
     for (const artikul of artikuls) {
-      await supabase
+      const { error: skuError } = await supabase
         .from('sku')
         .upsert({ artikul }, { onConflict: 'artikul' });
+      if (skuError) throw skuError;
     }
 
     // Insert metrics in chunks
@@ -104,13 +109,31 @@ export async function POST(request: NextRequest) {
       if (insertError) throw insertError;
     }
 
+    const { count, error: countError } = await supabase
+      .from('weekly_metrics')
+      .select('id', { count: 'exact', head: true })
+      .eq('import_id', importId);
+    if (countError) throw countError;
+
+    if (!count || count === 0) {
+      await supabase
+        .from('imports')
+        .update({ status: 'FAILED', error_message: 'No metrics saved' })
+        .eq('id', importId);
+      return NextResponse.json(
+        { error: 'No metrics saved for this import' },
+        { status: 500 }
+      );
+    }
+
     // Update import status
-    await supabase
+    const { error: statusError } = await supabase
       .from('imports')
       .update({ status: 'IMPORTED' })
       .eq('id', importId);
+    if (statusError) throw statusError;
 
-    return NextResponse.json({ success: true, importId });
+    return NextResponse.json({ success: true, importId, metricsCount: count });
   } catch (error) {
     console.error('Import error:', error);
     return NextResponse.json(
