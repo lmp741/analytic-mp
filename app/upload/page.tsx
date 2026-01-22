@@ -29,6 +29,10 @@ type ImportStats = {
   metricsAttempted: number;
   metricsInserted: number;
 };
+type PeriodState = {
+  start: string;
+  end: string;
+};
 
 const statusConfig: Record<StatusLevel, { label: string; className: string }> = {
   idle: { label: '⚪️ WAIT', className: 'text-muted-foreground' },
@@ -80,6 +84,8 @@ export default function UploadPage() {
   const [dbHealth, setDbHealth] = useState<DbHealth>({ status: 'checking', details: [] });
   const [wbImportStats, setWbImportStats] = useState<ImportStats | null>(null);
   const [ozonImportStats, setOzonImportStats] = useState<ImportStats | null>(null);
+  const [period, setPeriod] = useState<PeriodState>(() => getDefaultPeriod(new Date()));
+  const [periodDetected, setPeriodDetected] = useState<boolean>(false);
 
   useEffect(() => {
     const checkDbHealth = async () => {
@@ -111,6 +117,28 @@ export default function UploadPage() {
 
     checkDbHealth();
   }, []);
+
+  useEffect(() => {
+    if (!wbResult && !ozonResult) return;
+    const detected = wbResult?.periodStart && wbResult?.periodEnd
+      ? {
+          start: formatDateLocal(wbResult.periodStart),
+          end: formatDateLocal(wbResult.periodEnd),
+        }
+      : ozonResult?.periodStart && ozonResult?.periodEnd
+        ? {
+            start: formatDateLocal(ozonResult.periodStart),
+            end: formatDateLocal(ozonResult.periodEnd),
+          }
+        : null;
+
+    if (detected) {
+      setPeriod(detected);
+      setPeriodDetected(true);
+    } else {
+      setPeriodDetected(false);
+    }
+  }, [wbResult, ozonResult]);
 
   const parseWbFile = async (file: File) => {
     setWbFile(file);
@@ -167,6 +195,19 @@ export default function UploadPage() {
       );
       if (!proceed) return;
     }
+
+    if (!period.start || !period.end) {
+      setError('Период не заполнен. Укажите period_start и period_end перед импортом.');
+      setState('error');
+      return;
+    }
+
+    const periodValidation = validatePeriod(period.start, period.end);
+    if (!periodValidation.valid) {
+      setError(periodValidation.message);
+      setState('error');
+      return;
+    }
     
     // Check for existing imports and show confirmation
     // For now, proceed with import
@@ -177,7 +218,7 @@ export default function UploadPage() {
       let importedCount = 0;
 
       // Import WB if available
-      if (wbFile && wbResult && wbResult.periodStart && wbResult.periodEnd) {
+      if (wbFile && wbResult) {
         const wbArtikuls = new Set(wbResult.rows.map((row) => row.artikul));
         const wbHash = await computeFileHash(wbFile);
         const wbResponse = await fetch('/api/import', {
@@ -185,8 +226,8 @@ export default function UploadPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             marketplace: 'WB',
-            periodStart: wbResult.periodStart.toISOString().split('T')[0],
-            periodEnd: wbResult.periodEnd.toISOString().split('T')[0],
+            periodStart: period.start,
+            periodEnd: period.end,
             fileHash: wbHash,
             rows: wbResult.rows,
           }),
@@ -209,12 +250,10 @@ export default function UploadPage() {
           metricsInserted: wbPayload.metricsCount,
         });
         importedCount += 1;
-      } else if (wbFile && wbResult && (!wbResult.periodStart || !wbResult.periodEnd)) {
-        throw new Error('WB: период не найден. Укажите период вручную перед импортом.');
       }
 
       // Import Ozon if available
-      if (ozonFile && ozonResult && ozonResult.periodStart && ozonResult.periodEnd) {
+      if (ozonFile && ozonResult) {
         const ozonArtikuls = new Set(ozonResult.rows.map((row) => row.artikul));
         const ozonHash = await computeFileHash(ozonFile);
         const ozonResponse = await fetch('/api/import', {
@@ -222,8 +261,8 @@ export default function UploadPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             marketplace: 'OZON',
-            periodStart: ozonResult.periodStart.toISOString().split('T')[0],
-            periodEnd: ozonResult.periodEnd.toISOString().split('T')[0],
+            periodStart: period.start,
+            periodEnd: period.end,
             fileHash: ozonHash,
             rows: ozonResult.rows,
           }),
@@ -246,8 +285,6 @@ export default function UploadPage() {
           metricsInserted: ozonPayload.metricsCount,
         });
         importedCount += 1;
-      } else if (ozonFile && ozonResult && (!ozonResult.periodStart || !ozonResult.periodEnd)) {
-        throw new Error('OZON: период не найден. Укажите период вручную перед импортом.');
       }
 
       if (importedCount > 0) {
@@ -282,6 +319,14 @@ export default function UploadPage() {
           start: wbResult.periodStart.toISOString(),
           end: wbResult.periodEnd?.toISOString(),
         } : null,
+        detectedPeriod: wbResult.periodStart ? {
+          start: formatDateLocal(wbResult.periodStart),
+          end: wbResult.periodEnd ? formatDateLocal(wbResult.periodEnd) : null,
+        } : null,
+        chosenPeriod: {
+          start: period.start,
+          end: period.end,
+        },
         mapping: wbResult.diagnostics.columnMapping,
         header_row_index: wbResult.diagnostics.headerRowIndex,
         header_sample: wbResult.diagnostics.headerSample,
@@ -305,6 +350,14 @@ export default function UploadPage() {
           start: ozonResult.periodStart.toISOString(),
           end: ozonResult.periodEnd?.toISOString(),
         } : null,
+        detectedPeriod: ozonResult.periodStart ? {
+          start: formatDateLocal(ozonResult.periodStart),
+          end: ozonResult.periodEnd ? formatDateLocal(ozonResult.periodEnd) : null,
+        } : null,
+        chosenPeriod: {
+          start: period.start,
+          end: period.end,
+        },
         mapping: ozonResult.diagnostics.columnMapping,
         header_row_1_index: ozonResult.diagnostics.headerStartRow,
         header_row_2_index: ozonResult.diagnostics.headerSecondRow,
@@ -354,7 +407,12 @@ export default function UploadPage() {
           : 'idle';
 
   const dryRunComplete = (!wbFile || wbResult) && (!ozonFile || ozonResult);
-  const canImport = dryRunComplete && overallStatus !== 'error' && state !== 'importing';
+  const periodValidation = validatePeriod(period.start, period.end);
+  const canImport =
+    dryRunComplete &&
+    overallStatus !== 'error' &&
+    state !== 'importing' &&
+    periodValidation.valid;
 
   return (
     <div className="container mx-auto p-8 max-w-6xl">
@@ -396,6 +454,46 @@ export default function UploadPage() {
           ))}
         </div>
       </div>
+
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Период отчёта</CardTitle>
+          <CardDescription>
+            Период 7 дней. По умолчанию — предыдущая неделя (Пн–Вс).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Period start</label>
+              <Input
+                type="date"
+                value={period.start}
+                onChange={(event) => setPeriod((prev) => ({ ...prev, start: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Period end</label>
+              <Input
+                type="date"
+                value={period.end}
+                onChange={(event) => setPeriod((prev) => ({ ...prev, end: event.target.value }))}
+              />
+            </div>
+          </div>
+          <div
+            className={cn(
+              "text-sm font-medium",
+              periodDetected ? "text-emerald-600" : "text-amber-600"
+            )}
+          >
+            {periodDetected ? "Период найден ✅" : "Период не найден — укажите вручную"}
+          </div>
+          {!periodValidation.valid && (
+            <div className="text-sm text-red-600">{periodValidation.message}</div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <UploadCard
@@ -733,6 +831,48 @@ function UploadCard({
       </CardContent>
     </Card>
   );
+}
+
+function getDefaultPeriod(today: Date): PeriodState {
+  const currentDay = today.getDay();
+  const offsetToMonday = currentDay === 0 ? 6 : currentDay - 1;
+  const start = new Date(today);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - offsetToMonday - 7);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return {
+    start: formatDateLocal(start),
+    end: formatDateLocal(end),
+  };
+}
+
+function formatDateLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function validatePeriod(start: string, end: string): { valid: boolean; message?: string } {
+  if (!start || !end) {
+    return { valid: false, message: 'Период не заполнен.' };
+  }
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return { valid: false, message: 'Некорректные даты периода.' };
+  }
+  if (endDate < startDate) {
+    return { valid: false, message: 'Дата окончания меньше даты начала.' };
+  }
+  const diffMs = endDate.getTime() - startDate.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  if (diffDays !== 6) {
+    return { valid: false, message: 'Период должен быть ровно 7 дней (Пн–Вс).' };
+  }
+  return { valid: true };
 }
 
 function DiagnosticsAccordion({
