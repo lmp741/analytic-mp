@@ -159,7 +159,10 @@ function findColumnByGroupAndMetric(
 /**
  * Aggregates duplicate artikuls
  */
-function aggregateDuplicates(rows: OzonRow[]): OzonRow[] {
+function aggregateDuplicates(rows: OzonRow[]): {
+  rows: OzonRow[];
+  aggregatedCount: number;
+} {
   const map = new Map<string, OzonRow>();
   let aggregatedCount = 0;
   
