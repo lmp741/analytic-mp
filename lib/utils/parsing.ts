@@ -3,6 +3,7 @@
  * Handles RU locale, malformed data, and edge cases
  */
 
+import { parseRuNumber, parseRuPercentToFraction } from '@/lib/utils/number';
 /**
  * Normalizes header strings: trim, collapse spaces, replace line breaks
  */
@@ -22,46 +23,7 @@ export function normalizeHeader(str: string | null | undefined): string {
  * Handles: "12 345", "12,34", "12.34", "₽", "%", empty, "—", null
  */
 export function parseNumberRU(value: any): number | null {
-  if (value === null || value === undefined) return null;
-  
-  if (typeof value === 'number') {
-    if (isNaN(value) || !isFinite(value)) return null;
-    return value;
-  }
-
-  if (typeof value !== 'string') {
-    const num = Number(value);
-    if (!isNaN(num) && isFinite(num)) return num;
-    return null;
-  }
-
-  let str = value.trim();
-  
-  // Handle empty or dash
-  if (str === '' || str === '—' || str === '-' || str === '–') return null;
-  
-  // Remove currency and percent symbols
-  str = str.replace(/[₽%]/g, '');
-  str = str.replace(/[\u00a0]/g, ' ');
-  
-  // Remove spaces (thousand separators)
-  str = str.replace(/\s/g, '');
-  
-  // Replace comma with dot for decimal
-  if (str.includes(',') && str.includes('.')) {
-    str = str.replace(/\./g, '');
-  }
-  str = str.replace(',', '.');
-  
-  // Remove any remaining non-numeric characters except dot and minus
-  str = str.replace(/[^\d.-]/g, '');
-  
-  if (str === '' || str === '-' || str === '.') return null;
-  
-  const num = parseFloat(str);
-  if (isNaN(num) || !isFinite(num)) return null;
-  
-  return num;
+  return parseRuNumber(value);
 }
 
 /**
@@ -69,19 +31,7 @@ export function parseNumberRU(value: any): number | null {
  * If value > 1 and <= 100, assumes percent; else if 0..1 assumes fraction
  */
 export function parsePercentToFraction(value: any): number | null {
-  const num = parseNumberRU(value);
-  if (num === null) return null;
-  
-  if (num > 1 && num <= 100) {
-    // Assume percent, convert to fraction
-    return num / 100;
-  } else if (num >= 0 && num <= 1) {
-    // Already fraction
-    return num;
-  }
-  
-  // Out of range
-  return null;
+  return parseRuPercentToFraction(value);
 }
 
 /**

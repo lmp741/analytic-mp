@@ -510,10 +510,13 @@ export async function parseOzonFile(file: File): Promise<OzonParseResult> {
         'Заказано товаров'
       ) ?? 0;
       const revenue = clampNonNegative(parseNumberRU(getCell(columnMap.revenue)), 'Выручка');
-      const price_avg = clampNonNegative(
+      let price_avg = clampNonNegative(
         parseNumberRU(getCell(columnMap.price_avg)),
         'Средняя цена'
       );
+      if (price_avg === null && revenue !== null && orders > 0) {
+        price_avg = revenue / orders;
+      }
       const drr = clampFraction(
         parsePercentToFraction(getCell(columnMap.drr))
       );

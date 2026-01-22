@@ -9,9 +9,10 @@ import {
   formatInt,
   formatPercent,
   formatMoney,
-  formatDelta,
   getInvalidValueTooltip,
 } from '@/lib/utils/formatting';
+import { calcDeltaPercent } from '@/lib/utils/number';
+import { MetricCell } from '@/components/metric-cell';
 
 interface WeeklyMetric {
   artikul: string;
@@ -33,6 +34,9 @@ interface WeeklyMetric {
   delta_orders?: number | null;
   delta_revenue?: number | null;
   delta_drr?: number | null;
+  delta_add_to_cart?: number | null;
+  delta_cr_to_cart?: number | null;
+  delta_price_avg?: number | null;
 }
 
 export default function OzonDashboard() {
@@ -109,18 +113,24 @@ export default function OzonDashboard() {
         const prev = prevMetricsMap.get(current.artikul);
         return {
           ...current,
-          delta_impressions: prev
-            ? current.impressions - prev.impressions
-            : null,
-          delta_visits: prev ? current.visits - prev.visits : null,
-          delta_ctr: prev ? current.ctr - prev.ctr : null,
-          delta_orders: prev ? current.orders - prev.orders : null,
-          delta_revenue: prev && current.revenue && prev.revenue
-            ? Number(current.revenue) - Number(prev.revenue)
-            : null,
-          delta_drr: prev && current.drr !== null && prev.drr !== null
-            ? current.drr - prev.drr
-            : null,
+          delta_impressions: prev ? calcDeltaPercent(current.impressions, prev.impressions) : null,
+          delta_visits: prev ? calcDeltaPercent(current.visits, prev.visits) : null,
+          delta_ctr: prev ? calcDeltaPercent(current.ctr, prev.ctr) : null,
+          delta_add_to_cart: prev ? calcDeltaPercent(current.add_to_cart, prev.add_to_cart) : null,
+          delta_cr_to_cart: prev ? calcDeltaPercent(current.cr_to_cart, prev.cr_to_cart) : null,
+          delta_orders: prev ? calcDeltaPercent(current.orders, prev.orders) : null,
+          delta_revenue:
+            prev && current.revenue !== null && prev.revenue !== null
+              ? calcDeltaPercent(Number(current.revenue), Number(prev.revenue))
+              : null,
+          delta_drr:
+            prev && current.drr !== null && prev.drr !== null
+              ? calcDeltaPercent(current.drr, prev.drr)
+              : null,
+          delta_price_avg:
+            prev && current.price_avg !== null && prev.price_avg !== null
+              ? calcDeltaPercent(Number(current.price_avg), Number(prev.price_avg))
+              : null,
         };
       });
 
@@ -192,9 +202,6 @@ export default function OzonDashboard() {
               </thead>
               <tbody>
                 {metrics.map((metric) => {
-                  const impressionsDelta = formatDelta(metric.delta_impressions);
-                  const ctrDelta = formatDelta(metric.delta_ctr);
-                  const drrDelta = formatDelta(metric.delta_drr, true);
                   return (
                     <tr
                       key={metric.artikul}
@@ -208,82 +215,83 @@ export default function OzonDashboard() {
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.impressions) || undefined}
                       >
-                        {formatInt(metric.impressions)}
-                        {impressionsDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              impressionsDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {impressionsDelta.text}
-                          </span>
-                        )}
+                        <MetricCell
+                          value={formatInt(metric.impressions)}
+                          deltaPct={metric.delta_impressions ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.visits) || undefined}
                       >
-                        {formatInt(metric.visits)}
+                        <MetricCell
+                          value={formatInt(metric.visits)}
+                          deltaPct={metric.delta_visits ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.ctr) || undefined}
                       >
-                        {formatPercent(metric.ctr)}
-                        {ctrDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              ctrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {ctrDelta.text}
-                          </span>
-                        )}
+                        <MetricCell
+                          value={formatPercent(metric.ctr, 2)}
+                          deltaPct={metric.delta_ctr ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.add_to_cart) || undefined}
                       >
-                        {formatInt(metric.add_to_cart)}
+                        <MetricCell
+                          value={formatInt(metric.add_to_cart)}
+                          deltaPct={metric.delta_add_to_cart ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.cr_to_cart) || undefined}
                       >
-                        {formatPercent(metric.cr_to_cart)}
+                        <MetricCell
+                          value={formatPercent(metric.cr_to_cart, 2)}
+                          deltaPct={metric.delta_cr_to_cart ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.orders) || undefined}
                       >
-                        {formatInt(metric.orders)}
+                        <MetricCell
+                          value={formatInt(metric.orders)}
+                          deltaPct={metric.delta_orders ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.revenue) || undefined}
                       >
-                        {formatMoney(metric.revenue)}
+                        <MetricCell
+                          value={formatMoney(metric.revenue)}
+                          deltaPct={metric.delta_revenue ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.price_avg) || undefined}
                       >
-                        {formatMoney(metric.price_avg)}
+                        <MetricCell
+                          value={formatMoney(metric.price_avg)}
+                          deltaPct={metric.delta_price_avg ?? null}
+                        />
                       </td>
                       <td
                         className="border p-2"
                         title={getInvalidValueTooltip(metric.drr) || undefined}
                       >
-                        {formatPercent(metric.drr)}
-                        {drrDelta.isPositive !== null && (
-                          <span
-                            className={`ml-2 text-xs ${
-                              drrDelta.isPositive ? 'text-green-600' : 'text-red-600'
-                            }`}
-                          >
-                            {drrDelta.text}
-                          </span>
-                        )}
+                        <MetricCell
+                          value={formatPercent(metric.drr, 2)}
+                          deltaPct={metric.delta_drr ?? null}
+                          isInverted
+                        />
                       </td>
                       <td
                         className="border p-2"

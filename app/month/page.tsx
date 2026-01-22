@@ -239,7 +239,7 @@ export default function MonthPage() {
 
   return (
     <div className="container mx-auto p-8 max-w-7xl">
-      <h1 className="text-3xl font-bold mb-8">Month Summary</h1>
+      <h1 className="text-3xl font-bold mb-8">Итоги месяца</h1>
 
       <div className="space-y-8">
         {wbSummary && (
@@ -250,25 +250,25 @@ export default function MonthPage() {
             <CardContent>
               <div className="space-y-4">
                 <div>
-                  <strong>Period:</strong> {wbSummary.firstWeek} - {wbSummary.lastWeek}
+                  <strong>Период:</strong> {wbSummary.firstWeek} - {wbSummary.lastWeek}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong>Delta Orders:</strong> {formatInt(wbSummary.delta_orders)}
+                    <strong>Δ Заказы:</strong> {formatInt(wbSummary.delta_orders)}
                   </div>
                   <div>
-                    <strong>Delta Revenue:</strong> {formatMoney(wbSummary.delta_revenue)}
+                    <strong>Δ Выручка:</strong> {formatMoney(wbSummary.delta_revenue)}
                   </div>
                   <div>
-                    <strong>Delta CTR:</strong> {formatPercent(wbSummary.delta_ctr)}
+                    <strong>Δ CTR:</strong> {formatPercent(wbSummary.delta_ctr)}
                   </div>
                   <div>
-                    <strong>Delta CR:</strong> {formatPercent(wbSummary.delta_cr_to_cart)}
+                    <strong>Δ CR:</strong> {formatPercent(wbSummary.delta_cr_to_cart)}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong>Top Growers:</strong>
+                    <strong>Топ рост:</strong>
                     <ul className="list-disc list-inside">
                       {wbSummary.topGrowers.map((g) => (
                         <li key={g.artikul}>
@@ -278,7 +278,7 @@ export default function MonthPage() {
                     </ul>
                   </div>
                   <div>
-                    <strong>Top Fallers:</strong>
+                    <strong>Топ падение:</strong>
                     <ul className="list-disc list-inside">
                       {wbSummary.topFallers.map((f) => (
                         <li key={f.artikul}>
@@ -301,25 +301,25 @@ export default function MonthPage() {
             <CardContent>
               <div className="space-y-4">
                 <div>
-                  <strong>Period:</strong> {ozonSummary.firstWeek} - {ozonSummary.lastWeek}
+                  <strong>Период:</strong> {ozonSummary.firstWeek} - {ozonSummary.lastWeek}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong>Delta Orders:</strong> {formatInt(ozonSummary.delta_orders)}
+                    <strong>Δ Заказы:</strong> {formatInt(ozonSummary.delta_orders)}
                   </div>
                   <div>
-                    <strong>Delta Revenue:</strong> {formatMoney(ozonSummary.delta_revenue)}
+                    <strong>Δ Выручка:</strong> {formatMoney(ozonSummary.delta_revenue)}
                   </div>
                   <div>
-                    <strong>Delta CTR:</strong> {formatPercent(ozonSummary.delta_ctr)}
+                    <strong>Δ CTR:</strong> {formatPercent(ozonSummary.delta_ctr)}
                   </div>
                   <div>
-                    <strong>Delta CR:</strong> {formatPercent(ozonSummary.delta_cr_to_cart)}
+                    <strong>Δ CR:</strong> {formatPercent(ozonSummary.delta_cr_to_cart)}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <strong>Top Growers:</strong>
+                    <strong>Топ рост:</strong>
                     <ul className="list-disc list-inside">
                       {ozonSummary.topGrowers.map((g) => (
                         <li key={g.artikul}>
@@ -329,7 +329,7 @@ export default function MonthPage() {
                     </ul>
                   </div>
                   <div>
-                    <strong>Top Fallers:</strong>
+                    <strong>Топ падение:</strong>
                     <ul className="list-disc list-inside">
                       {ozonSummary.topFallers.map((f) => (
                         <li key={f.artikul}>
