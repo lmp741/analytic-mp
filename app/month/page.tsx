@@ -109,7 +109,10 @@ export default function MonthPage() {
 
           growths.sort((a, b) => b.growth - a.growth);
           const topGrowers = growths.slice(0, 5);
-          const topFallers = growths.slice(-5).reverse();
+          const topFallers = growths.slice(-5).reverse().map(item => ({
+            artikul: item.artikul,
+            decline: -item.growth
+          }));
 
           setWbSummary({
             marketplace: 'WB',
@@ -153,20 +156,69 @@ export default function MonthPage() {
           .eq('import_id', lastImport.id);
 
         if (firstMetrics && lastMetrics) {
-          // Similar aggregation logic for Ozon
-          // ... (simplified for brevity)
+          const firstMap = new Map(firstMetrics.map((m) => [m.artikul, m]));
+          const lastMap = new Map(lastMetrics.map((m) => [m.artikul, m]));
+
+          let totalOrdersFirst = 0;
+          let totalOrdersLast = 0;
+          let totalRevenueFirst = 0;
+          let totalRevenueLast = 0;
+          let totalCtrFirst = 0;
+          let totalCtrLast = 0;
+          let totalCrFirst = 0;
+          let totalCrLast = 0;
+          let totalPriceFirst = 0;
+          let totalPriceLast = 0;
+          let countFirst = 0;
+          let countLast = 0;
+
+          firstMap.forEach((m) => {
+            totalOrdersFirst += m.orders;
+            if (m.revenue) totalRevenueFirst += Number(m.revenue);
+            totalCtrFirst += m.ctr;
+            totalCrFirst += m.cr_to_cart;
+            if (m.price_avg) totalPriceFirst += Number(m.price_avg);
+            countFirst++;
+          });
+
+          lastMap.forEach((m) => {
+            totalOrdersLast += m.orders;
+            if (m.revenue) totalRevenueLast += Number(m.revenue);
+            totalCtrLast += m.ctr;
+            totalCrLast += m.cr_to_cart;
+            if (m.price_avg) totalPriceLast += Number(m.price_avg);
+            countLast++;
+          });
+
+          const growths: Array<{ artikul: string; growth: number }> = [];
+          lastMap.forEach((last, artikul) => {
+            const first = firstMap.get(artikul);
+            if (first && first.orders > 0) {
+              const growth = (last.orders - first.orders) / first.orders;
+              growths.push({ artikul, growth });
+            }
+          });
+
+          growths.sort((a, b) => b.growth - a.growth);
+          const topGrowers = growths.slice(0, 5);
+          const topFallers = growths.slice(-5).reverse().map(item => ({
+            artikul: item.artikul,
+            decline: -item.growth
+          }));
+
           setOzonSummary({
             marketplace: 'OZON',
             firstWeek: firstImport.period_start,
             lastWeek: lastImport.period_start,
-            delta_orders: 0,
-            delta_revenue: null,
-            delta_ctr: 0,
-            delta_cr_to_cart: 0,
-            delta_price_avg: null,
+            delta_orders: totalOrdersLast - totalOrdersFirst,
+            delta_revenue: totalRevenueLast - totalRevenueFirst,
+            delta_ctr: totalCtrLast / countLast - totalCtrFirst / countFirst,
+            delta_cr_to_cart: totalCrLast / countLast - totalCrFirst / countFirst,
+            delta_price_avg:
+              totalPriceLast / countLast - totalPriceFirst / countFirst,
             delta_drr: null,
-            topGrowers: [],
-            topFallers: [],
+            topGrowers,
+            topFallers,
           });
         }
       }
@@ -214,15 +266,27 @@ export default function MonthPage() {
                     <strong>Delta CR:</strong> {formatPercent(wbSummary.delta_cr_to_cart)}
                   </div>
                 </div>
-                <div>
-                  <strong>Top Growers:</strong>
-                  <ul className="list-disc list-inside">
-                    {wbSummary.topGrowers.map((g) => (
-                      <li key={g.artikul}>
-                        {g.artikul}: {formatPercent(g.growth)}
-                      </li>
-                    ))}
-                  </ul>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Top Growers:</strong>
+                    <ul className="list-disc list-inside">
+                      {wbSummary.topGrowers.map((g) => (
+                        <li key={g.artikul}>
+                          {g.artikul}: {formatPercent(g.growth)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>Top Fallers:</strong>
+                    <ul className="list-disc list-inside">
+                      {wbSummary.topFallers.map((f) => (
+                        <li key={f.artikul}>
+                          {f.artikul}: {formatPercent(-f.decline)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -239,7 +303,42 @@ export default function MonthPage() {
                 <div>
                   <strong>Period:</strong> {ozonSummary.firstWeek} - {ozonSummary.lastWeek}
                 </div>
-                {/* Similar display for Ozon */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Delta Orders:</strong> {formatInt(ozonSummary.delta_orders)}
+                  </div>
+                  <div>
+                    <strong>Delta Revenue:</strong> {formatMoney(ozonSummary.delta_revenue)}
+                  </div>
+                  <div>
+                    <strong>Delta CTR:</strong> {formatPercent(ozonSummary.delta_ctr)}
+                  </div>
+                  <div>
+                    <strong>Delta CR:</strong> {formatPercent(ozonSummary.delta_cr_to_cart)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <strong>Top Growers:</strong>
+                    <ul className="list-disc list-inside">
+                      {ozonSummary.topGrowers.map((g) => (
+                        <li key={g.artikul}>
+                          {g.artikul}: {formatPercent(g.growth)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>Top Fallers:</strong>
+                    <ul className="list-disc list-inside">
+                      {ozonSummary.topFallers.map((f) => (
+                        <li key={f.artikul}>
+                          {f.artikul}: {formatPercent(-f.decline)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
