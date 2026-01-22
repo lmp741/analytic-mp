@@ -15,69 +15,50 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    // Check if import already exists
-    const { data: existingImport, error: existingError } = await supabase
-      .from('imports')
-      .select('id')
-      .eq('marketplace', marketplace)
-      .eq('period_start', periodStart)
-      .single();
-    if (existingError && existingError.code !== 'PGRST116') {
-      throw existingError;
+    if (!['WB', 'OZON'].includes(marketplace)) {
+      return NextResponse.json({ error: 'Invalid marketplace' }, { status: 400 });
     }
-
-    let importId: string;
-
-    if (existingImport) {
-      // Update existing import
-      const { data: updated, error: updateError } = await supabase
-        .from('imports')
-        .update({
-          period_end: periodEnd,
-          file_hash: fileHash,
-          status: 'PENDING',
-          error_message: null,
-        })
-        .eq('id', existingImport.id)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-      importId = updated.id;
-
-      // Delete existing metrics
-      const { error: deleteError } = await supabase
-        .from('weekly_metrics')
-        .delete()
-        .eq('import_id', importId);
-      if (deleteError) throw deleteError;
-    } else {
-      // Create new import
-      const { data: newImport, error: createError } = await supabase
-        .from('imports')
-        .insert({
-          marketplace,
-          period_start: periodStart,
-          period_end: periodEnd,
-          file_hash: fileHash,
-          status: 'PENDING',
-        })
-        .select()
-        .single();
-
-      if (createError) throw createError;
-      importId = newImport.id;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(periodStart) || !datePattern.test(periodEnd)) {
+      return NextResponse.json(
+        { error: 'Invalid period format. Use YYYY-MM-DD.' },
+        { status: 400 }
+      );
     }
 
     // Upsert SKUs
     const artikuls = [...new Set(rows.map((r: any) => r.artikul))];
-    for (const artikul of artikuls) {
-      const { error: skuError } = await supabase
-        .from('sku')
-        .upsert({ artikul }, { onConflict: 'artikul' });
-      if (skuError) throw skuError;
-    }
+    const skuPayload = artikuls.map((artikul) => ({ artikul }));
+    const { error: skuError } = await supabase
+      .from('sku')
+      .upsert(skuPayload, { onConflict: 'artikul', ignoreDuplicates: true });
+    if (skuError) throw skuError;
+
+    // Upsert import
+    const { data: importRow, error: importError } = await supabase
+      .from('imports')
+      .upsert(
+        {
+          marketplace,
+          period_start: periodStart,
+          period_end: periodEnd,
+          file_hash: fileHash,
+          status: 'IMPORTED',
+          error_message: null,
+        },
+        { onConflict: 'marketplace,period_start' }
+      )
+      .select('id')
+      .single();
+    if (importError) throw importError;
+    const importId = importRow.id;
+
+    // Delete existing metrics for this import
+    const { error: deleteError } = await supabase
+      .from('weekly_metrics')
+      .delete()
+      .eq('import_id', importId);
+    if (deleteError) throw deleteError;
 
     // Insert metrics in chunks
     const chunkSize = 200;
@@ -106,7 +87,16 @@ export async function POST(request: NextRequest) {
         .from('weekly_metrics')
         .insert(metrics);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        await supabase
+          .from('imports')
+          .update({
+            status: 'FAILED',
+            error_message: insertError.message,
+          })
+          .eq('id', importId);
+        throw insertError;
+      }
     }
 
     const { count, error: countError } = await supabase
@@ -136,8 +126,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, importId, metricsCount: count });
   } catch (error) {
     console.error('Import error:', error);
+    const details =
+      typeof error === 'object' && error !== null && 'details' in error
+        ? (error as { details?: string }).details
+        : null;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Import failed' },
+      {
+        error: error instanceof Error ? error.message : 'Import failed',
+        details: details || null,
+      },
       { status: 500 }
     );
   }

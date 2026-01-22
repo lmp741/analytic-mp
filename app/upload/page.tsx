@@ -24,6 +24,11 @@ type DbHealth = {
   status: 'checking' | 'ok' | 'error';
   details: string[];
 };
+type ImportStats = {
+  skuUpsertSize: number;
+  metricsAttempted: number;
+  metricsInserted: number;
+};
 
 const statusConfig: Record<StatusLevel, { label: string; className: string }> = {
   idle: { label: '⚪️ WAIT', className: 'text-muted-foreground' },
@@ -73,6 +78,8 @@ export default function UploadPage() {
   const [state, setState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [dbHealth, setDbHealth] = useState<DbHealth>({ status: 'checking', details: [] });
+  const [wbImportStats, setWbImportStats] = useState<ImportStats | null>(null);
+  const [ozonImportStats, setOzonImportStats] = useState<ImportStats | null>(null);
 
   useEffect(() => {
     const checkDbHealth = async () => {
@@ -171,6 +178,7 @@ export default function UploadPage() {
 
       // Import WB if available
       if (wbFile && wbResult && wbResult.periodStart && wbResult.periodEnd) {
+        const wbArtikuls = new Set(wbResult.rows.map((row) => row.artikul));
         const wbHash = await computeFileHash(wbFile);
         const wbResponse = await fetch('/api/import', {
           method: 'POST',
@@ -186,17 +194,28 @@ export default function UploadPage() {
 
         if (!wbResponse.ok) {
           const error = await wbResponse.json();
-          throw new Error(error.error || 'WB import failed');
+          const message = error.details
+            ? `${error.error} (${error.details})`
+            : error.error || 'WB import failed';
+          throw new Error(message);
         }
         const wbPayload = await wbResponse.json();
         if (!wbPayload.metricsCount || wbPayload.metricsCount === 0) {
           throw new Error('WB import failed: no metrics saved');
         }
+        setWbImportStats({
+          skuUpsertSize: wbArtikuls.size,
+          metricsAttempted: wbResult.rows.length,
+          metricsInserted: wbPayload.metricsCount,
+        });
         importedCount += 1;
+      } else if (wbFile && wbResult && (!wbResult.periodStart || !wbResult.periodEnd)) {
+        throw new Error('WB: период не найден. Укажите период вручную перед импортом.');
       }
 
       // Import Ozon if available
       if (ozonFile && ozonResult && ozonResult.periodStart && ozonResult.periodEnd) {
+        const ozonArtikuls = new Set(ozonResult.rows.map((row) => row.artikul));
         const ozonHash = await computeFileHash(ozonFile);
         const ozonResponse = await fetch('/api/import', {
           method: 'POST',
@@ -212,13 +231,23 @@ export default function UploadPage() {
 
         if (!ozonResponse.ok) {
           const error = await ozonResponse.json();
-          throw new Error(error.error || 'Ozon import failed');
+          const message = error.details
+            ? `${error.error} (${error.details})`
+            : error.error || 'Ozon import failed';
+          throw new Error(message);
         }
         const ozonPayload = await ozonResponse.json();
         if (!ozonPayload.metricsCount || ozonPayload.metricsCount === 0) {
           throw new Error('Ozon import failed: no metrics saved');
         }
+        setOzonImportStats({
+          skuUpsertSize: ozonArtikuls.size,
+          metricsAttempted: ozonResult.rows.length,
+          metricsInserted: ozonPayload.metricsCount,
+        });
         importedCount += 1;
+      } else if (ozonFile && ozonResult && (!ozonResult.periodStart || !ozonResult.periodEnd)) {
+        throw new Error('OZON: период не найден. Укажите период вручную перед импортом.');
       }
 
       if (importedCount > 0) {
@@ -230,6 +259,18 @@ export default function UploadPage() {
       setError(err instanceof Error ? err.message : 'Ошибка импорта');
       setState('error');
     }
+  };
+
+  const buildImportStats = (
+    rows: { artikul: string }[],
+    importStats: ImportStats | null
+  ) => {
+    const uniqueArtikuls = new Set(rows.map((row) => row.artikul));
+    return {
+      skuUpsertSize: importStats?.skuUpsertSize ?? uniqueArtikuls.size,
+      metricsAttempted: importStats?.metricsAttempted ?? rows.length,
+      metricsInserted: importStats?.metricsInserted ?? 0,
+    };
   };
 
   const downloadDiagnostics = () => {
@@ -248,6 +289,9 @@ export default function UploadPage() {
           totalRowsScanned: wbResult.diagnostics.totalRowsScanned,
           rowsAccepted: wbResult.diagnostics.rowsAccepted,
           rowsSkipped: wbResult.diagnostics.rowsSkipped,
+          skuUpsertSize: buildImportStats(wbResult.rows, wbImportStats).skuUpsertSize,
+          metricsAttempted: buildImportStats(wbResult.rows, wbImportStats).metricsAttempted,
+          metricsInserted: buildImportStats(wbResult.rows, wbImportStats).metricsInserted,
           skipReasons: wbResult.diagnostics.skipReasons,
         },
         warnings: wbResult.warnings,
@@ -271,6 +315,9 @@ export default function UploadPage() {
           rowsSkipped: ozonResult.diagnostics.rowsSkipped,
           duplicatesAggregated: ozonResult.diagnostics.duplicatesAggregated,
           aggregationApplied: ozonResult.diagnostics.aggregationApplied,
+          skuUpsertSize: buildImportStats(ozonResult.rows, ozonImportStats).skuUpsertSize,
+          metricsAttempted: buildImportStats(ozonResult.rows, ozonImportStats).metricsAttempted,
+          metricsInserted: buildImportStats(ozonResult.rows, ozonImportStats).metricsInserted,
           skipReasons: ozonResult.diagnostics.skipReasons,
         },
         warnings: ozonResult.warnings,
@@ -446,6 +493,7 @@ export default function UploadPage() {
                     skipReasons: wbResult.diagnostics.skipReasons,
                     headerSample: wbResult.diagnostics.headerSample,
                     columnMapping: wbResult.diagnostics.columnMapping,
+                    ...buildImportStats(wbResult.rows, wbImportStats),
                   }}
                   errors={wbResult.errors}
                   warnings={wbResult.warnings}
@@ -535,6 +583,7 @@ export default function UploadPage() {
                     },
                     headerSample: ozonResult.diagnostics.headerSample,
                     columnMapping: ozonResult.diagnostics.columnMapping,
+                    ...buildImportStats(ozonResult.rows, ozonImportStats),
                   }}
                   errors={ozonResult.errors}
                   warnings={ozonResult.warnings}
@@ -706,6 +755,9 @@ function DiagnosticsAccordion({
     totalRowsScanned: number;
     rowsAccepted: number;
     rowsSkipped: number;
+    skuUpsertSize: number;
+    metricsAttempted: number;
+    metricsInserted: number;
     skipReasons: Record<string, number>;
     headerSample: string[];
     columnMapping: Record<string, string | null>;
@@ -788,6 +840,15 @@ function DiagnosticsAccordion({
             </div>
             <div>
               <strong>Rows skipped:</strong> {diagnostics.rowsSkipped}
+            </div>
+            <div>
+              <strong>SKU upsert size:</strong> {diagnostics.skuUpsertSize}
+            </div>
+            <div>
+              <strong>weekly_metrics attempted:</strong> {diagnostics.metricsAttempted}
+            </div>
+            <div>
+              <strong>weekly_metrics inserted:</strong> {diagnostics.metricsInserted}
             </div>
             {Object.keys(diagnostics.skipReasons).length > 0 && (
               <div>

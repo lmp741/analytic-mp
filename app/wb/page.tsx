@@ -48,14 +48,17 @@ export default function WBDashboard() {
       const supabase = createClient();
       
       // Get latest import
-      const { data: latestImport } = await supabase
+      const { data: latestImport, error: latestImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'WB')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (latestImportError && latestImportError.code !== 'PGRST116') {
+        throw latestImportError;
+      }
 
       if (!latestImport) {
         setLoading(false);
@@ -67,13 +70,16 @@ export default function WBDashboard() {
       prevWeekStart.setDate(prevWeekStart.getDate() - 7);
       const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-      const { data: prevImport } = await supabase
+      const { data: prevImport, error: prevImportError } = await supabase
         .from('imports')
         .select('id')
         .eq('marketplace', 'WB')
         .eq('period_start', prevWeekStartStr)
         .eq('status', 'IMPORTED')
-        .single();
+        .maybeSingle();
+      if (prevImportError && prevImportError.code !== 'PGRST116') {
+        throw prevImportError;
+      }
 
       // Get current metrics
       const { data: currentMetrics } = await supabase

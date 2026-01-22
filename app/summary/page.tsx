@@ -45,32 +45,41 @@ export default function SummaryPage() {
       const supabase = createClient();
 
       // Load settings
-      const { data: settingsData } = await supabase
+      const { data: settingsData, error: settingsError } = await supabase
         .from('settings')
         .select('*')
         .eq('id', 1)
-        .single();
+        .maybeSingle();
+      if (settingsError && settingsError.code !== 'PGRST116') {
+        throw settingsError;
+      }
       setSettings(settingsData);
 
       // Load WB latest
-      const { data: wbImport } = await supabase
+      const { data: wbImport, error: wbImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'WB')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (wbImportError && wbImportError.code !== 'PGRST116') {
+        throw wbImportError;
+      }
 
       // Load Ozon latest
-      const { data: ozonImport } = await supabase
+      const { data: ozonImport, error: ozonImportError } = await supabase
         .from('imports')
         .select('id, period_start')
         .eq('marketplace', 'OZON')
         .eq('status', 'IMPORTED')
         .order('period_start', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+      if (ozonImportError && ozonImportError.code !== 'PGRST116') {
+        throw ozonImportError;
+      }
 
       if (!settingsData) {
         setLoading(false);
@@ -92,12 +101,15 @@ export default function SummaryPage() {
         prevWeekStart.setDate(prevWeekStart.getDate() - 7);
         const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-        const { data: prevWbImport } = await supabase
+        const { data: prevWbImport, error: prevWbError } = await supabase
           .from('imports')
           .select('id')
           .eq('marketplace', 'WB')
           .eq('period_start', prevWeekStartStr)
-          .single();
+          .maybeSingle();
+        if (prevWbError && prevWbError.code !== 'PGRST116') {
+          throw prevWbError;
+        }
 
         const { data: wbMetrics } = await supabase
           .from('weekly_metrics')
@@ -171,12 +183,15 @@ export default function SummaryPage() {
         prevWeekStart.setDate(prevWeekStart.getDate() - 7);
         const prevWeekStartStr = prevWeekStart.toISOString().split('T')[0];
 
-        const { data: prevOzonImport } = await supabase
+        const { data: prevOzonImport, error: prevOzonError } = await supabase
           .from('imports')
           .select('id')
           .eq('marketplace', 'OZON')
           .eq('period_start', prevWeekStartStr)
-          .single();
+          .maybeSingle();
+        if (prevOzonError && prevOzonError.code !== 'PGRST116') {
+          throw prevOzonError;
+        }
 
         const { data: ozonMetrics } = await supabase
           .from('weekly_metrics')
