@@ -35,7 +35,7 @@ describe('parsing utilities', () => {
   test('findHeaderRowByKeywords finds header by section labels', () => {
     const data = [
       ['Отчет', null],
-      ['Воронка продаж', 'Факторы продаж', null],
+      ['Товары', 'Воронка продаж', 'Факторы продаж'],
       ['Артикул', 'Показы всего', 'Посещения карточки товара'],
     ];
     const headerRowIndex = findHeaderRowByKeywords(

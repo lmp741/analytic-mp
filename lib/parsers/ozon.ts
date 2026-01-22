@@ -123,10 +123,15 @@ function findSheet(workbook: XLSX.WorkBook, expectedName: string): string | null
 function buildCompositeHeaders(row1: any[], row2: any[]): string[] {
   const maxLen = Math.max(row1.length, row2.length);
   const headers: string[] = [];
+  let lastGroup = '';
   
   for (let i = 0; i < maxLen; i++) {
-    const group = normalizeHeader(row1[i]);
+    const groupRaw = normalizeHeader(row1[i]);
+    const group = groupRaw || lastGroup;
     const metric = normalizeHeader(row2[i] || '');
+    if (group) {
+      lastGroup = group;
+    }
     const composite = metric ? (group ? `${group} | ${metric}` : metric) : group;
     const isDynamic =
       composite.includes('динамика') || group.includes('динамика') || metric.includes('динамика');
@@ -159,6 +164,19 @@ function findColumnByGroupAndMetric(
     }
   }
   
+  return null;
+}
+
+function findColumnByMetricOnly(headers: string[], metricPatterns: string[]): number | null {
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i];
+    if (!header) continue;
+    const parts = header.split('|').map((part) => part.trim());
+    const metric = parts.length > 1 ? parts[1] : parts[0];
+    if (metricPatterns.some((p) => metric.includes(normalizeHeader(p)))) {
+      return i;
+    }
+  }
   return null;
 }
 
@@ -294,11 +312,23 @@ export async function parseOzonFile(file: File): Promise<OzonParseResult> {
       return result;
     }
 
-    const headerStartRow = findHeaderRowByKeywords(
-      data,
-      ['Воронка продаж', 'Факторы продаж', 'Продажи'],
-      60
-    );
+    let headerStartRow: number | null = null;
+    const maxHeaderScan = Math.min(60, data.length - 1);
+    for (let i = 0; i <= maxHeaderScan; i++) {
+      const row = data[i] || [];
+      const normalized = row.map((cell) => normalizeHeader(cell));
+      const hasProducts = normalized.some((cell) => cell.includes('товар'));
+      const hasGroups = normalized.some(
+        (cell) =>
+          cell.includes('воронка продаж') ||
+          cell.includes('факторы продаж') ||
+          cell.includes('продажи')
+      );
+      if (hasProducts && hasGroups) {
+        headerStartRow = i;
+        break;
+      }
+    }
 
     if (headerStartRow === null) {
       result.errors.push(
@@ -324,18 +354,24 @@ export async function parseOzonFile(file: File): Promise<OzonParseResult> {
     result.diagnostics.headerSample = headerSample;
 
     // Map columns
+    const impressionsComposite = findColumnByGroupAndMetric(
+      compositeHeaders,
+      ['воронка продаж'],
+      ['показы всего', 'показы']
+    );
+    const visitsComposite = findColumnByGroupAndMetric(
+      compositeHeaders,
+      ['воронка продаж'],
+      ['посещения карточки товара', 'посещения карточки']
+    );
     const columnMap: Record<string, number | null> = {
       artikul: findColumnByGroupAndMetric(compositeHeaders, [], ['артикул']),
-      impressions: findColumnByGroupAndMetric(
-        compositeHeaders,
-        ['воронка продаж'],
-        ['показы всего', 'показы']
-      ),
-      visits: findColumnByGroupAndMetric(
-        compositeHeaders,
-        ['воронка продаж'],
-        ['посещения карточки товара', 'посещения карточки']
-      ),
+      impressions:
+        impressionsComposite ??
+        findColumnByMetricOnly(compositeHeaders, ['показы всего', 'показы']),
+      visits:
+        visitsComposite ??
+        findColumnByMetricOnly(compositeHeaders, ['посещения карточки товара', 'посещения карточки']),
       add_to_cart: findColumnByGroupAndMetric(
         compositeHeaders,
         ['воронка продаж'],
@@ -411,7 +447,7 @@ export async function parseOzonFile(file: File): Promise<OzonParseResult> {
     }
 
     // Parse rows
-    const startRow = headerSecondRow + 1;
+    const startRow = headerSecondRow + 3;
     result.diagnostics.totalRowsScanned = data.length - startRow;
     const warningsSet = new Set<string>();
     let zeroImpressionsCount = 0;
